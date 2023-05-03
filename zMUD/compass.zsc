@@ -1,0 +1,16 @@
+#CLASS {Compass}
+#ALIAS ShowExits {#call %btnenable(btnnw,%ismember(nw,%1));#call %btnenable(btnn,%ismember(n,%1));#call %btnenable(btnne,%ismember(ne,%1));#call %btnenable(btnw,%ismember(w,%1));#call %btnenable(btne,%ismember(e,%1));#call %btnenable(btnsw,%ismember(sw,%1));#call %btnenable(btns,%ismember(s,%1));#call %btnenable(btnse,%ismember(se,%1));#call %btnenable(btnd,%ismember(d,%1));#call %btnenable(btnu,%ismember(u,%1));#call %btnenable(btnout,%ismember(out,%1))}
+#BUTTON 1 {} {nw} {} {} {} {} {ARROWNW} {Size} {23} {23} {} {} {} {} {} {} {} "" {Explore} {nw} {btnnw} {4}
+#BUTTON 2 {} {w} {} {} {} {} {ARROWL} {Size} {23} {23} {} {} {} {} {} {} {} "" {Explore} {west} {btnw} {4}
+#BUTTON 3 {} {sw} {} {} {} {} {ARROWSW} {Size} {23} {23} {} {} {} {} {} {} {} "" {Explore} {sw} {btnsw} {4}
+#BUTTON 4 {} {u} {} {} {} {} {DIRN} {Size} {23} {23} {} {} {} {} {} {} {} "" {Explore} {up} {btnu} {4}
+#BUTTON 5 {} {n} {} {} {} {} {ARROWU} {Size} {23} {23} {Pos} {1} {24} {} {} {} {} "" {Explore} {north} {btnn} {4}
+#BUTTON 6 {} {look} {} {} {} {} {TARGET} {Size} {23} {23} {} {} {} {} {} {} {} "" {Explore} {look} {btnlook} {4}
+#BUTTON 7 {} {s} {} {} {} {} {ARROWD} {Size} {23} {23} {} {} {} {} {} {} {} "" {Explore} {south} {btns} {4}
+#BUTTON 8 {} {d} {} {} {} {} {DIRS} {Size} {23} {23} {} {} {} {} {} {} {} "" {Explore} {down} {btnd} {4}
+#BUTTON 9 {} {ne} {} {} {} {} {ARROWNE} {Size} {23} {23} {Pos} {1} {47} {} {} {} {} "" {Explore} {ne} {btnne} {4}
+#BUTTON 10 {} {e} {} {} {} {} {ARROWR} {Size} {23} {23} {} {} {} {} {} {} {} "" {Explore} {east} {btne} {4}
+#BUTTON 11 {} {se} {} {} {} {} {ARROWSE} {Size} {23} {23} {} {} {} {} {} {} {} "" {Explore} {se} {btnse} {4}
+#BUTTON 12 {} {out} {} {} {} {} {DOOROPEN} {Size} {23} {23} {} {} {} {} {} {} {} "" {Explore} {out} {btnout} {4}
+#CLASS 0
+
