@@ -1,6 +1,6 @@
 import webbrowser
-
 import pyodbc
+
 def find_access_driver():
     for driver in pyodbc.drivers():
         if 'ACCESS' in driver.upper():
@@ -27,19 +27,28 @@ else:
         table_names = [table.table_name for table in tables]
 
         print("Found tables:")
-        for name in table_names:
-            print(name)
+        for table_name in table_names:
+            print(table_name)
 
-        if not table_names:
-            print("No tables found.")
-        else:
-            example_table = table_names[0]
-            print(f"\nColumns in '{example_table}':")
+            # Fetching column names
+            columns = cursor.columns(table=table_name)
+            column_names = [column.column_name for column in columns]
 
-            columns = cursor.columns(table=example_table)
-            for column in columns:
-                print(f"{column.column_name} ({column.type_name})")
+            # Fetching data for each column
+            for column_name in column_names:
+                print(f"\tColumn: {column_name}")
 
+                try:
+                    # Fetching at least one row of data for the column
+                    cursor.execute(f"SELECT TOP 1 [{column_name}] FROM [{table_name}]")
+                    row = cursor.fetchone()
+
+                    if row is not None:
+                        print(f"\t\tExample data: {row[0]}")
+                    else:
+                        print("\t\tNo data available.")
+                except Exception as e:
+                    print(f"\t\tError fetching data: {e}")
 
         conn.close()
     except Exception as e:
