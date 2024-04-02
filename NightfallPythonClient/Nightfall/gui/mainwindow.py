@@ -1,7 +1,6 @@
 #mainwindow.py
 import tkinter as tk
 from tkinter.font import Font
-from tkfontchooser import askfont
 from network.connection import MUDConnection
 from config.settings import load_config, save_config
 import re
@@ -10,73 +9,81 @@ class MainWindow:
     def __init__(self, root):
         self.config = load_config()
         self.root = root
-        self.root.title("MUD Client")
-        self.root.geometry("800x600")
-
-        
-        font_name = self.config.get('Font', 'name')
-        font_size = self.config.getint('Font', 'size')
-        font_color = self.config.get('Font', 'color')
-        bg_color = self.config.get('Font', 'background_color')
-        self.current_font = Font(family=font_name, size=font_size)
-
-        
-        self.text_area = tk.Text(root, bg=bg_color, fg=font_color, font=self.current_font, cursor="xterm")
-        self.text_area.tag_configure("red", foreground="#ff0000")
-        self.text_area.tag_configure("green", foreground="#00ff00")
-
-        
-        font_name = self.config.get('Font', 'name')
-        font_size = self.config.getint('Font', 'size')
-        font_color = self.config.get('Font', 'color')
-        bg_color = self.config.get('Font', 'background_color')
-        self.current_font = Font(family=font_name, size=font_size)
-
-        
-        self.text_area = tk.Text(root, bg=bg_color, fg=font_color, font=self.current_font, cursor="xterm")
-        self.text_area.pack(fill=tk.BOTH, expand=True)
-        self.text_area.bind("<Key>", self.on_key_press)
-        self.text_area.tag_configure("input", background=bg_color, foreground=font_color)
-
-        
-        self.toolbar = tk.Frame(root, height=20)
-        self.toolbar.pack(side=tk.TOP, fill=tk.X)
-        self.font_button = tk.Button(self.toolbar, text="F", command=self.choose_font, width=2, height=1)
-        self.font_button.pack(side=tk.LEFT, padx=2, pady=2)
-
+        self.setup_ui()
         self.connection = MUDConnection(self.display_message)
         self.connection.connect()
 
-    def display_message(self, message):
-        message = message.replace('\x1b[31m', '<red>').replace('\x1b[32m', '<green>').replace('\x1b[0m',
-                                                                                           '</color>')  # Reset color to default
-        parts = re.split('(<[^>]+>|</color>)', message)
-        apply_color = None
-        for part in parts:
-            if part == '<red>' or part == '<green>':
-                apply_color = part[1:-1]
-            elif part == '</color>':
-                apply_color = None
+    def setup_ui(self):
+        self.root.title("MUD Client")
+        self.root.geometry("800x600")
+
+        bg_color = self.config.get('Font', 'background_color')
+        font_color = self.config.get('Font', 'color')
+
+        self.text_area = tk.Text(self.root, wrap=tk.WORD, state='disabled', bg=bg_color, fg=font_color)
+        self.text_area.pack(fill=tk.BOTH, expand=True, side=tk.TOP)
+
+        self.ansi_colors = self.load_ansi_colors()
+        self.create_color_tags()
+
+        self.input_area = tk.Entry(self.root)
+        self.input_area.pack(fill=tk.X, side=tk.BOTTOM)
+        self.input_area.bind("<Return>", self.send_input)
+
+    def load_ansi_colors(self):
+        colors = {}
+        if self.config.has_section('ANSIColors'):
+            for code in self.config['ANSIColors']:
+                colors[code] = self.config.get('ANSIColors', code)
+        return colors
+
+    def create_color_tags(self):
+        for code, color in self.ansi_colors.items():
+            self.text_area.tag_configure(code, foreground=color)
+
+    def send_input(self, event):
+        input_text = self.input_area.get()
+        self.connection.send(input_text)
+        self.input_area.delete(0, tk.END)
+
+    def debug_ansi_codes(self, text):
+        print(" ".join(f"{ord(c):02x}" for c in text))
+
+    def ANSI_Color_Text(self, message):
+        # Load ANSI colors from configuration
+        self.ansi_colors = self.load_ansi_colors()
+
+        current_color = None
+        buffer = ""
+        i = 0
+
+        while i < len(message):
+            if message[i] == '\x1b' and message[i + 1:i + 2] == '[':
+                end_idx = message.find('m', i)
+
+                color_code = message[i + 2:end_idx]
+                if color_code in self.ansi_colors:
+                    if buffer:
+                        self.display_text(buffer, current_color)
+                        buffer = ""
+                    current_color = color_code  # Save the ANSI color code
+                i = end_idx
             else:
-                if apply_color:
-                    self.text_area.insert(tk.END, part, apply_color)
-                else:
-                    self.text_area.insert(tk.END, part)
+                buffer += message[i]
+            i += 1
+
+        if buffer:
+            self.display_text(buffer, current_color)
+
+    def display_text(self, text, color_tag):
+        self.text_area.config(state='normal')
+        if color_tag and color_tag in self.ansi_colors:
+            self.text_area.insert(tk.END, text, color_tag)
+        else:
+            self.text_area.insert(tk.END, text)
+        self.text_area.config(state='disabled')
         self.text_area.see(tk.END)
 
-    def choose_font(self):
-        font = askfont(self.root)
-        if font:
-            
-            self.current_font.config(**font)
-            
-            self.config.set('Font', 'name', font['family'])
-            self.config.set('Font', 'size', str(font['size']))
-            save_config(self.config)
-            self.text_area.config(font=self.current_font)
 
-    def on_key_press(self, event):
-        
-        if event.char.isprintable():
-            pass
-        return "break"  
+    def display_message(self, message):
+        self.ANSI_Color_Text(message)

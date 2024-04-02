@@ -1,3 +1,4 @@
+#settings.py
 from configparser import ConfigParser
 import os
 
