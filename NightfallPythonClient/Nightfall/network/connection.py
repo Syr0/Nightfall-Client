@@ -4,7 +4,7 @@ from threading import Thread
 from config.settings import load_config
 
 class MUDConnection:
-    def __init__(self, on_message=None):
+    def __init__(self, on_message=None, on_login_success=None):
         config = load_config()
         self.host = config.get('Network', 'host')
         self.port = config.getint('Network', 'port')
@@ -12,9 +12,10 @@ class MUDConnection:
         self.user = config.get('Credentials', 'USER')
         self.password = config.get('Credentials', 'PASS')
         self.on_message = on_message
+        self.on_login_success = on_login_success
         self.socket = None
         self.connected = False
-        self.login_attempted = False  # Flag to ensure login happens only once
+        self.login_attempted = False
 
     def connect(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -32,15 +33,17 @@ class MUDConnection:
                 data = self.socket.recv(4096).decode('utf-8', errors='replace')
                 if data and self.on_message:
                     self.on_message(data)
-                # Check for the login trigger if login hasn't been attempted yet
                 if not self.login_attempted and "Enter your name," in data:
-                    self.login_attempted = True  # Prevent further login attempts
-                    self.send(self.user)  # Send the username
-                    self.send(self.password)  # Send the password
+                    self.login_attempted = True
+                    self.send(self.user)
+                    self.send(self.password)
+                success_message = load_config().get('Login', 'success_message')
+                if success_message in data:
+                    if self.on_login_success:
+                        self.on_login_success()
         except Exception as e:
             print(f"Connection error: {e}")
             self.connected = False
-
     def close(self):
         if self.connected:
             self.send(self.quit_command)

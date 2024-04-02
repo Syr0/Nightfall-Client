@@ -1,7 +1,8 @@
+#mainwindow.py
 import tkinter as tk
-from tkinter.font import Font
+from tkinter import font as tkfont
 from network.connection import MUDConnection
-from config.settings import load_config, save_config
+from config.settings import load_config
 import re
 
 class MainWindow:
@@ -11,7 +12,8 @@ class MainWindow:
         self.config = load_config()
         self.root = root
         self.setup_ui()
-        self.connection = MUDConnection(self.display_message)
+        self.setup_bindings()
+        self.connection = MUDConnection(self.display_message, self.on_login_success)
         self.connection.connect()
 
     def setup_ui(self):
@@ -26,7 +28,23 @@ class MainWindow:
         self.input_area = tk.Entry(self.root)
         self.input_area.pack(fill=tk.X, side=tk.BOTTOM)
         self.input_area.bind("<Return>", self.send_input)
+        self.text_area.bind("<1>", lambda event: self.input_area.focus())
+        self.text_area.bind("<Control-c>", self.copy_text)
 
+    def setup_bindings(self):
+        self.root.bind("<Control-c>", lambda event: self.copy_text(event))
+
+    def copy_text(self, event=None):
+        try:
+            selected_text = self.text_area.get(tk.SEL_FIRST, tk.SEL_LAST)
+            self.root.clipboard_clear()
+            self.root.clipboard_append(selected_text)
+        except tk.TclError:
+            pass
+    def on_login_success(self):
+        initial_commands = self.config.get('InitialCommands', 'commands').split(',')
+        for command in initial_commands:
+            self.connection.send(command.strip())
     def load_ansi_colors(self):
         colors = {}
         if self.config.has_section('ANSIColors'):
@@ -81,7 +99,7 @@ class MainWindow:
     def schedule_update(self):
         if not self.update_pending:
             self.update_pending = True
-            self.root.after(100, self.update_text_area)  # Adjust delay as needed
+            self.root.after(100, self.update_text_area)
 
     def update_text_area(self):
         self.text_area.config(state='normal')
@@ -97,3 +115,8 @@ class MainWindow:
 
     def display_message(self, message):
         self.ANSI_Color_Text(message)
+
+    def on_login_success(self):
+        initial_commands = self.config.get('InitialCommands', 'commands').split(',')
+        for command in initial_commands:
+            self.connection.send(command.strip())
