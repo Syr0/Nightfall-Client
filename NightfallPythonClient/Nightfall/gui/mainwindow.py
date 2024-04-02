@@ -62,11 +62,16 @@ class MainWindow:
                 end_idx = message.find('m', i)
 
                 color_code = message[i + 2:end_idx]
-                if color_code in self.ansi_colors:
+                if color_code == '0':
                     if buffer:
                         self.display_text(buffer, current_color)
                         buffer = ""
-                    current_color = color_code  # Save the ANSI color code
+                    current_color = None
+                elif color_code in self.ansi_colors:
+                    if buffer:
+                        self.display_text(buffer, current_color)
+                        buffer = ""
+                    current_color = color_code
                 i = end_idx
             else:
                 buffer += message[i]
