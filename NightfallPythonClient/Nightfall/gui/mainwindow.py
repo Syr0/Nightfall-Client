@@ -1,4 +1,3 @@
-#mainwindow.py
 import tkinter as tk
 from tkinter.font import Font
 from network.connection import MUDConnection
@@ -7,6 +6,8 @@ import re
 
 class MainWindow:
     def __init__(self, root):
+        self.update_buffer = []
+        self.update_pending = False
         self.config = load_config()
         self.root = root
         self.setup_ui()
@@ -16,16 +17,12 @@ class MainWindow:
     def setup_ui(self):
         self.root.title("MUD Client")
         self.root.geometry("800x600")
-
         bg_color = self.config.get('Font', 'background_color')
         font_color = self.config.get('Font', 'color')
-
         self.text_area = tk.Text(self.root, wrap=tk.WORD, state='disabled', bg=bg_color, fg=font_color)
         self.text_area.pack(fill=tk.BOTH, expand=True, side=tk.TOP)
-
         self.ansi_colors = self.load_ansi_colors()
         self.create_color_tags()
-
         self.input_area = tk.Entry(self.root)
         self.input_area.pack(fill=tk.X, side=tk.BOTTOM)
         self.input_area.bind("<Return>", self.send_input)
@@ -50,9 +47,7 @@ class MainWindow:
         print(" ".join(f"{ord(c):02x}" for c in text))
 
     def ANSI_Color_Text(self, message):
-        # Load ANSI colors from configuration
         self.ansi_colors = self.load_ansi_colors()
-
         current_color = None
         buffer = ""
         i = 0
@@ -60,16 +55,15 @@ class MainWindow:
         while i < len(message):
             if message[i] == '\x1b' and message[i + 1:i + 2] == '[':
                 end_idx = message.find('m', i)
-
                 color_code = message[i + 2:end_idx]
                 if color_code == '0':
                     if buffer:
-                        self.display_text(buffer, current_color)
+                        self.append_to_buffer(buffer, current_color)
                         buffer = ""
                     current_color = None
                 elif color_code in self.ansi_colors:
                     if buffer:
-                        self.display_text(buffer, current_color)
+                        self.append_to_buffer(buffer, current_color)
                         buffer = ""
                     current_color = color_code
                 i = end_idx
@@ -78,17 +72,28 @@ class MainWindow:
             i += 1
 
         if buffer:
-            self.display_text(buffer, current_color)
+            self.append_to_buffer(buffer, current_color)
+        self.schedule_update()
 
-    def display_text(self, text, color_tag):
+    def append_to_buffer(self, text, color_tag=None):
+        self.update_buffer.append((text, color_tag))
+
+    def schedule_update(self):
+        if not self.update_pending:
+            self.update_pending = True
+            self.root.after(100, self.update_text_area)  # Adjust delay as needed
+
+    def update_text_area(self):
         self.text_area.config(state='normal')
-        if color_tag and color_tag in self.ansi_colors:
-            self.text_area.insert(tk.END, text, color_tag)
-        else:
-            self.text_area.insert(tk.END, text)
+        for text, color_tag in self.update_buffer:
+            if color_tag and color_tag in self.ansi_colors:
+                self.text_area.insert(tk.END, text, color_tag)
+            else:
+                self.text_area.insert(tk.END, text)
         self.text_area.config(state='disabled')
         self.text_area.see(tk.END)
-
+        self.update_buffer = []
+        self.update_pending = False
 
     def display_message(self, message):
         self.ANSI_Color_Text(message)
