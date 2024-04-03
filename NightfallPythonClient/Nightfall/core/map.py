@@ -12,18 +12,15 @@ class MapViewer:
     def __init__(self, parent, main_pane):
         self.parent = parent
         self.main_pane = main_pane
-        self.tooltip = None
-        self.drawn_bounds = None
         self.load_config()
 
-        self.this = tk.Canvas(self.parent, bg='pink')
+        self.this = tk.Canvas(self.parent, bg=self.background_color)
         self.this.pack(fill=tk.BOTH, expand=True)
 
         self.zone_dict = self.fetch_zone_dict()
         self.setup_bindings()
         self.initialize_ui()
         self.tooltips = {}
-
 
     def initialize_ui(self):
         zone_listbox_frame = ttk.Frame(self.main_pane, width=200)
@@ -48,8 +45,9 @@ class MapViewer:
         config = configparser.ConfigParser()
         config.read(config_file_path)
 
-        self.room_distance = int(config['Visuals']['RoomDistance'])
+        self.player_marker_color = config['Visuals']['PlayerMarkerColor']
         self.background_color = config['Visuals']['BackgroundColor']
+        self.room_distance = int(config['Visuals']['RoomDistance'])
         self.room_color = config['Visuals']['RoomColor']
         self.directed_graph = config.getboolean('Visuals', 'DirectedGraph')
         self.default_zone = config['General']['DefaultZone']
@@ -77,21 +75,19 @@ class MapViewer:
         return self.this.create_polygon([x1+radius, y1, x2-radius, y1, x2, y1, x2, y1+radius, x2, y2-radius, x2, y2, x2-radius, y2, x1+radius, y2, x1, y2, x1, y2-radius, x1, y1+radius, x1, y1], **kwargs, smooth=True)
 
     def draw_room_with_shadow(self, x, y, room_id, room_name):
-        shadow_offset = 6
         box_size = 20
+        shadow_offset = 6
         tag_id = str(room_id)
 
+
         shadow_tag = f"{tag_id}_shadow"
-        room_tag = f"{tag_id}_room"
         self.create_rounded_rectangle(x - box_size + shadow_offset, y - box_size + shadow_offset,
                                       x + box_size + shadow_offset, y + box_size + shadow_offset, radius=10,
-                                      fill="gray20",
-                                      tags=(shadow_tag,))
+                                      fill="gray20", tags=(shadow_tag,))
+
+        room_tag = f"{tag_id}_room"
         self.create_rounded_rectangle(x - box_size, y - box_size, x + box_size, y + box_size, radius=10,
                                       fill=self.room_color, tags=(room_tag,))
-
-        self.this.tag_bind(room_tag, "<Enter>", lambda e, id=room_id: self.show_room_name(e, id))
-        self.this.tag_bind(room_tag, "<Leave>", self.hide_room_name)
 
     def draw_exits(self, rooms, exits):
         bidirectional = set()
@@ -123,7 +119,6 @@ class MapViewer:
         min_x, min_y, max_x, max_y = float('inf'), float('inf'), float('-inf'), float('-inf')
 
         for room_id, x, y, name in rooms:
-            # Corrected: Removed the extra 'self' from the call
             self.draw_room_with_shadow(x, y, str(room_id), name)
             min_x, min_y = min(min_x, x - offset), min(min_y, y - offset)
             max_x, max_y = max(max_x, x + offset), max(max_y, y + offset)
@@ -140,6 +135,10 @@ class MapViewer:
                               tags="center_of_mass")
         self.drawn_bounds = (min_x, min_y, max_x, max_y)
         self.draw_exits(rooms, exits)
+
+    def set_player_position(self, room_id):
+        room_tag = f"{room_id}_room"
+        self.this.itemconfig(room_tag, outline=self.player_marker_color)
 
     def on_mousewheel(self, event):
         scale = 1.0

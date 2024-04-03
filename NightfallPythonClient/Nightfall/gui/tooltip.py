@@ -1,7 +1,7 @@
 #tooltip.py
 import tkinter as tk
 
-# In tooltip.py
+
 class ToolTip(object):
     def __init__(self, widget):
         self.widget = widget
@@ -12,20 +12,39 @@ class ToolTip(object):
     def show_tip(self, tip_text, event_x, event_y):
         if self.tip_window or not tip_text:
             return
+
         x = self.widget.winfo_rootx() + event_x
-        y = self.widget.winfo_rooty() + event_y
-        x += 20
-        y += 20
+        y = self.widget.winfo_rooty() + event_y + 20
+
         if not self.tip_window:
             self.tip_window = tw = tk.Toplevel(self.widget)
             tw.wm_overrideredirect(True)
-            tw.wm_geometry("+%d+%d" % (x, y))
-            label = tk.Label(tw, text=tip_text, justify=tk.LEFT,
-                             background="#ffffe0", relief=tk.SOLID, borderwidth=1,
-                             font=("tahoma", "8", "normal"))
-            label.pack(ipadx=1)
+            tw.config(bg='black')
+
+
+            frame = tk.Frame(tw, background="#FF00FF", borderwidth=2)
+            frame.pack()
+
+            label = tk.Label(frame, text=tip_text, justify=tk.CENTER,
+                             background="#2e2e2e", relief=tk.FLAT, borderwidth=4,
+                             font=("Consolas", "10", "normal"), fg="#ffffff")
+            label.pack()
+
+            tw.update_idletasks()
+            width = tw.winfo_width()
+            height = tw.winfo_height()
+
+            screen_width = self.widget.winfo_screenwidth()
+            x_centered = max(x - width // 2, 0)
+            x_centered = min(x_centered, screen_width - width)
+
+            tw.wm_geometry("+%d+%d" % (x_centered, y))
         else:
-            self.tip_window.wm_geometry("+%d+%d" % (x, y))
+
+            for child in self.tip_window.winfo_children():
+                for grandchild in child.winfo_children():
+                    if isinstance(grandchild, tk.Label):
+                        grandchild.config(text=tip_text)
 
     def hide_tip(self):
         if self.tip_window:

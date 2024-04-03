@@ -7,7 +7,7 @@ config_file_path = os.path.join(os.path.dirname(__file__), 'settings.ini')
 def save_config(settings):
     config = ConfigParser()
     config.read_dict(settings)
-    os.makedirs(os.path.dirname(config_file_path), exist_ok=True)  # Ensure directory exists
+    os.makedirs(os.path.dirname(config_file_path), exist_ok=True)
     with open(config_file_path, 'w') as configfile:
         config.write(configfile)
 
