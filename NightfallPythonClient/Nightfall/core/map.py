@@ -90,9 +90,8 @@ def draw_map(rooms, exits):
         center_of_mass = (total_x / count, total_y / count)
 
     center_x, center_y = center_of_mass
-    canvas.create_oval(center_x - 5, center_y - 5, center_x + 5, center_y + 5, fill="yellow", outline="yellow",
+    canvas.create_oval(center_x - 20, center_y - 20, center_x + 20, center_y + 20, fill="yellow", outline="yellow",
                        tags="center_of_mass")
-
     drawn_bounds = (min_x, min_y, max_x, max_y)
     draw_exits(rooms, exits)
 
@@ -143,20 +142,8 @@ def center_and_zoom_out_map():
     canvas_width = canvas.winfo_width()
     canvas_height = canvas.winfo_height()
 
-    min_x, min_y, max_x, max_y = drawn_bounds
-    scale_x = canvas_width / (max_x - min_x)
-    scale_y = canvas_height / (max_y - min_y)
-    scale = min(scale_x, scale_y, 1)
-
-    canvas.scale("all", 0, 0, scale, scale)
-
-    scaled_center_x = center_of_mass[0] * scale
-    scaled_center_y = center_of_mass[1] * scale
-
-    canvas.xview_moveto(max(0, (scaled_center_x - canvas_width / 2) / (canvas_width * scale)))
-    canvas.yview_moveto(max(0, (scaled_center_y - canvas_height / 2) / (canvas_height * scale)))
-    adjust_scrollregion()
-
+    x,y = center_of_mass
+    focus_point(x,y)
 
 def on_zone_select(event):
     if not event.widget.curselection():
@@ -230,5 +217,4 @@ canvas.bind("<Button-2>", on_middle_click)
 canvas.bind("<B2-Motion>", on_middle_move)
 
 zone_listbox = create_zone_listbox()
-select_default_zone(zone_listbox)
 root.mainloop()
