@@ -89,6 +89,9 @@ class MapViewer:
         self.create_rounded_rectangle(x - box_size, y - box_size, x + box_size, y + box_size, radius=10,
                                       fill=self.room_color, tags=(room_tag,))
 
+        self.this.tag_bind(room_tag, "<Enter>", lambda e, id=room_id: self.show_room_name(e, id))
+        self.this.tag_bind(room_tag, "<Leave>", self.hide_room_name)
+
     def draw_exits(self, rooms, exits):
         bidirectional = set()
         exits_tuples = {(exit.FromID, exit.ToID) for exit in exits}
