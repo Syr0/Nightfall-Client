@@ -13,7 +13,7 @@ import matplotlib.pyplot as plt
 import matplotlib.lines as mlines
 from matplotlib.backends.backend_tkagg import FigureCanvasTkAgg
 import pyodbc
-
+import ctypes
 
 def find_access_driver():
     for driver in pyodbc.drivers():
@@ -41,36 +41,28 @@ else:
     conn_str = f'DRIVER={{{access_driver}}};DBQ={db_file}'
 
 
-# Initialize main window
 root = tk.Tk()
 root.title("Map Viewer")
 root.geometry("1200x600")
 
-# Split the window using PanedWindow
 pane = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
 pane.pack(fill=tk.BOTH, expand=True)
 
-# Define left_panel and right_panel
 left_panel = ttk.Frame(pane, width=120)
 right_panel = ttk.Frame(pane, width=1080)
 
-# Add panels to pane
-pane.add(left_panel, weight=1)
-pane.add(right_panel, weight=9)
+pane.add(left_panel, weight=2)
+pane.add(right_panel, weight=8)
 
-# Setup for zone selection and map drawing
 zone_var = tk.StringVar()
 figure = plt.Figure(figsize=(5, 4), dpi=100)
 canvas = FigureCanvasTkAgg(figure, right_panel)
 canvas_widget = canvas.get_tk_widget()
 canvas_widget.pack(fill=tk.BOTH, expand=True)
 
-
 def open_db_connection():
     return pyodbc.connect(conn_str)
 
-
-# Function to fetch zones from the database
 def fetch_zones():
     with open_db_connection() as conn:
         cursor = conn.cursor()
@@ -78,73 +70,61 @@ def fetch_zones():
         zones = cursor.fetchall()
     return zones
 
-
-# Function to fetch rooms of the selected zone
 def fetch_rooms(zone_id):
     with open_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT ObjID, X, Y, Name FROM ObjectTbl WHERE ZoneID = ?", (zone_id,))
+        cursor.execute("SELECT ObjID, X, Y FROM ObjectTbl WHERE ZoneID = ?", (zone_id,))
         rooms = cursor.fetchall()
     return rooms
 
-
-# Function to fetch exits for drawing connections
 def fetch_exits(from_obj_ids):
     with open_db_connection() as conn:
         cursor = conn.cursor()
         placeholders = ','.join('?' for _ in from_obj_ids)
-        query = f"SELECT FromID, ToID FROM ExitTbl WHERE FromID IN ({placeholders})"
-        cursor.execute(query, from_obj_ids)
+        cursor.execute(f"SELECT FromID, ToID FROM ExitTbl WHERE FromID IN ({placeholders})", from_obj_ids)
         exits = cursor.fetchall()
     return exits
 
 
-# Function to handle zone selection
 def on_zone_select(event):
-    zone_id = zone_dict[zone_var.get()]
+    if not event.widget.curselection():
+        return
+    index = event.widget.curselection()[0]
+    zone_name = event.widget.get(index)
+    zone_id = zone_dict[zone_name]
     rooms = fetch_rooms(zone_id)
+
     if not rooms:
         print("No rooms found for this zone.")
         return
 
-    print(f"Total number of rooms: {len(rooms)}")
-
-    # Clear previous map drawings
     figure.clear()
-
-    # Prepare for new drawing
     ax = figure.add_subplot(111)
     ax.set_aspect('equal', 'box')
-    room_positions = {room[0]: (room[1], room[2]) for room in rooms}  # Map ObjID to its coordinates
+    ax.axis('off')
 
-    # Draw rooms
     for room in rooms:
-        ax.plot(room[1], room[2], 'bo')  # Draw room as a blue dot
-        ax.text(room[1], room[2], room[3], fontsize=8)  # Add room name
+        ax.plot(room[1], room[2], 's', markersize=5, markeredgecolor='black', markerfacecolor='blue')
 
-    # Draw exits/connections
-    exits = fetch_exits(list(room_positions.keys()))
+    exits = fetch_exits([room[0] for room in rooms])
     for exit in exits:
-        from_pos = room_positions.get(exit[0])
-        to_pos = room_positions.get(exit[1])
+        from_pos = next((room[1:3] for room in rooms if room[0] == exit[0]), None)
+        to_pos = next((room[1:3] for room in rooms if room[0] == exit[1]), None)
         if from_pos and to_pos:
             ax.add_line(mlines.Line2D([from_pos[0], to_pos[0]], [from_pos[1], to_pos[1]], linewidth=1, color='black'))
-
     canvas.draw()
-def update_zone_combobox():
-    zones = fetch_zones()  # Fetch zones from database
-    zone_names = [zone[1] for zone in zones]  # List of zone names for display
-    global zone_dict  # Ensure zone_dict is accessible
-    zone_dict = {zone[1]: zone[0] for zone in zones}  # Dictionary mapping names to IDs
 
-    zone_listbox = ttk.Combobox(left_panel, textvariable=zone_var, values=zone_names)
-    zone_listbox.pack(fill=tk.X, padx=5, pady=5)
-    zone_listbox.bind('<<ComboboxSelected>>', on_zone_select)
+def update_zone_listbox():
+    zones = fetch_zones()
+    global zone_dict
+    zone_dict = {zone[1]: zone[0] for zone in zones}
 
+    zone_listbox = tk.Listbox(left_panel, height=len(zones))
+    for zone_name, _ in zone_dict.items():
+        zone_listbox.insert(tk.END, zone_name)
+    zone_listbox.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
+    zone_listbox.bind('<<ListboxSelect>>', on_zone_select)
+
+update_zone_listbox()
 setup_map_events(canvas, figure)
-
-# Ensure all GUI components are defined before making function calls
-update_zone_combobox()
-
-# Start the main GUI loop
 root.mainloop()

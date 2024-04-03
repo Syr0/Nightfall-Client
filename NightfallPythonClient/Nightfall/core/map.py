@@ -8,21 +8,40 @@ prev_y = None
 def setup_map_events(canvas, figure):
     def on_zoom(event):
         ax = figure.gca()
-        xlim = ax.get_xlim()
-        ylim = ax.get_ylim()
-        zoom_scale = 1.1 if event.button == 'up' else (1 / 1.1)
-        ax.set_xlim([x * zoom_scale for x in xlim])
-        ax.set_ylim([y * zoom_scale for y in ylim])
+        cur_xlim = ax.get_xlim()
+        cur_ylim = ax.get_ylim()
+
+        base_scale = 1.1
+
+        if event.button == 'up':
+            scale_factor = 1 / base_scale
+        elif event.button == 'down':
+            scale_factor = base_scale
+        else:
+            return
+
+        xdata, ydata = event.xdata, event.ydata
+        if xdata is None or ydata is None:
+            return
+
+        new_width = (cur_xlim[1] - cur_xlim[0]) * scale_factor
+        new_height = (cur_ylim[1] - cur_ylim[0]) * scale_factor
+        relx = (cur_xlim[1] - xdata) / (cur_xlim[1] - cur_xlim[0])
+        rely = (cur_ylim[1] - ydata) / (cur_ylim[1] - cur_ylim[0])
+
+        ax.set_xlim([xdata - new_width * (1 - relx), xdata + new_width * relx])
+        ax.set_ylim([ydata - new_height * (1 - rely), ydata + new_height * rely])
+
         canvas.draw_idle()
 
     def on_press(event):
         global prev_x, prev_y
-        if event.button == 2:  # Middle mouse button
+        if event.button == 2:
             prev_x, prev_y = event.x, event.y
 
     def on_release(event):
         global prev_x, prev_y
-        if event.button == 2:  # Middle mouse button
+        if event.button == 2:
             prev_x, prev_y = None, None
 
     def on_move(event):
@@ -32,7 +51,7 @@ def setup_map_events(canvas, figure):
             xlim = ax.get_xlim()
             ylim = ax.get_ylim()
             dx = (prev_x - event.x) * (xlim[1] - xlim[0]) / canvas.figure.get_figwidth() / canvas.figure.dpi
-            dy = (event.y - prev_y) * (ylim[1] - ylim[0]) / canvas.figure.get_figheight() / canvas.figure.dpi
+            dy = (prev_y - event.y) * (ylim[1] - ylim[0]) / canvas.figure.get_figheight() / canvas.figure.dpi  # Inverted dy
             ax.set_xlim([x + dx for x in xlim])
             ax.set_ylim([y + dy for y in ylim])
             canvas.draw_idle()
