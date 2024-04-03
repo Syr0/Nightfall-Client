@@ -6,215 +6,223 @@ import configparser
 from tkinter import ttk
 from core.database import fetch_rooms, fetch_zones, fetch_exits, fetch_room_name
 
-prev_x = None
-prev_y = None
-tooltip = None
-drawn_bounds = None
-center_of_mass = (0, 0)
+class MapViewer:
+    def __init__(self, parent, main_pane):
+        self.parent = parent
+        self.main_pane = main_pane
+        self.tooltip = None
+        self.drawn_bounds = None
+        self.load_config()
 
-config_file_path = os.path.join(os.path.dirname(__file__), '../config/settings.ini')
+        self.this = tk.Canvas(self.parent, bg='pink')
+        self.this.pack(fill=tk.BOTH, expand=True)
 
-config = configparser.ConfigParser()
-config.read(config_file_path)
+        self.zone_dict = self.fetch_zone_dict()
+        self.setup_bindings()
+        self.initialize_ui()
 
-ROOM_DISTANCE = int(config['Visuals']['RoomDistance'])
-BACKGROUND_COLOR = config['Visuals']['BackgroundColor']
-ROOM_COLOR = config['Visuals']['RoomColor']
-DIRECTED_GRAPH = config['Visuals']['DirectedGraph'] == 'True'
-DEFAULT_ZONE = config['General']['DefaultZone']
+    def initialize_ui(self):
+        zone_listbox_frame = ttk.Frame(self.main_pane, width=200)
+        self.zone_listbox = tk.Listbox(zone_listbox_frame, height=10)
+        for zone_name in sorted(self.zone_dict.keys()):
+            self.zone_listbox.insert(tk.END, zone_name)
+        self.zone_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.zone_listbox.bind('<<ListboxSelect>>', self.on_zone_select)
+        self.main_pane.add(zone_listbox_frame, weight=1)
 
-def create_rounded_rectangle(canvas, x1, y1, x2, y2, radius=25, **kwargs):
-    points = [
-        x1+radius, y1,
-        x1+radius, y1, x2-radius, y1,
-        x2-radius, y1, x2, y1,
-        x2, y1, x2, y1+radius,
-        x2, y1+radius, x2, y2-radius,
-        x2, y2-radius, x2, y2,
-        x2, y2, x2-radius, y2,
-        x2-radius, y2, x1+radius, y2,
-        x1+radius, y2, x1, y2,
-        x1, y2, x1, y2-radius,
-        x1, y2-radius, x1, y1+radius,
-        x1, y1+radius, x1, y1,
-    ]
-    return canvas.create_polygon(points, **kwargs, smooth=True)
+    def set_parent(self, parent):
+        self.parent = parent
+        self.initialize_canvas()
+        self.setup_bindings()
 
-def draw_room_with_shadow(canvas, x, y, room_id, room_name):
-    shadow_offset = 6
-    box_size = 20
-    create_rounded_rectangle(canvas, x-box_size+shadow_offset, y-box_size+shadow_offset, x+box_size+shadow_offset, y+box_size+shadow_offset, radius=10, fill="gray20", tags=(room_id, "shadow"))
-    room = create_rounded_rectangle(canvas, x-box_size, y-box_size, x+box_size, y+box_size, radius=10, fill=ROOM_COLOR, tags=(room_id, "room"))
-    canvas.tag_bind(room, "<Enter>", lambda e, name=room_name: show_room_name(e, name))
-    canvas.tag_bind(room, "<Leave>", hide_room_name)
+    def initialize_canvas(self):
+        self.this = tk.Canvas(self.parent, bg=self.background_color)
+        self.this.pack(fill=tk.BOTH, expand=True)
 
-def draw_exits(rooms, exits):
-    bidirectional = set()
-    exits_tuples = {(exit.FromID, exit.ToID) for exit in exits}
+    def load_config(self):
+        config_file_path = os.path.join(os.path.dirname(__file__), '../config/settings.ini')
+        config = configparser.ConfigParser()
+        config.read(config_file_path)
 
-    for exit in exits_tuples:
-        from_id, to_id = exit
-        if (to_id, from_id) in exits_tuples:
-            bidirectional.add(exit)
+        self.room_distance = int(config['Visuals']['RoomDistance'])
+        self.background_color = config['Visuals']['BackgroundColor']
+        self.room_color = config['Visuals']['RoomColor']
+        self.directed_graph = config.getboolean('Visuals', 'DirectedGraph')
+        self.default_zone = config['General']['DefaultZone']
 
-    for exit in exits_tuples:
-        from_id, to_id = exit
-        from_pos = next((room[1:3] for room in rooms if room[0] == from_id), None)
-        to_pos = next((room[1:3] for room in rooms if room[0] == to_id), None)
-        if from_pos and to_pos:
-            if exit in bidirectional:
-                canvas.create_line(from_pos[0], from_pos[1], to_pos[0], to_pos[1], fill=ROOM_COLOR)
-            else:
-                canvas.create_line(from_pos[0], from_pos[1], to_pos[0], to_pos[1], arrow=tk.LAST, fill=ROOM_COLOR)
+    def setup_bindings(self):
+        self.this.bind("<MouseWheel>", self.on_mousewheel)
+        self.this.bind("<Button-2>", self.on_middle_click)
+        self.this.bind("<B2-Motion>", self.on_middle_move)
 
-def draw_map(rooms, exits):
-    global drawn_bounds, center_of_mass
-    total_x, total_y, count = 0, 0, 0
-    count = 0
-    room_size = 20
-    shadow_offset = 6
-    extra_padding = 10
+    def fetch_zone_dict(self):
+        zones = fetch_zones()
+        return {zone[1]: zone[0] for zone in zones}
 
-    offset = room_size + shadow_offset + extra_padding
-    min_x, min_y, max_x, max_y = float('inf'), float('inf'), float('-inf'), float('-inf')
+    def draw_initial_map(self):
+        default_zone_id = self.zone_dict.get(self.default_zone, None)
+        if default_zone_id:
+            self.display_zone(default_zone_id)
 
-    for room_id, x, y, name in rooms:
-        draw_room_with_shadow(canvas, x, y, str(room_id), name)
-        min_x, min_y = min(min_x, x - offset), min(min_y, y - offset)
-        max_x, max_y = max(max_x, x + offset), max(max_y, y + offset)
-        total_x += x
-        total_y += y
-        count += 1
+    def display_zone(self, zone_id):
+        rooms = fetch_rooms(zone_id)
+        exits = fetch_exits([room[0] for room in rooms])
+        self.draw_map(rooms, exits)
 
-    if count > 0:
-        center_of_mass = (total_x / count, total_y / count)
+    def create_rounded_rectangle(self, x1, y1, x2, y2, radius=25, **kwargs):
+        return self.this.create_polygon([x1+radius, y1, x2-radius, y1, x2, y1, x2, y1+radius, x2, y2-radius, x2, y2, x2-radius, y2, x1+radius, y2, x1, y2, x1, y2-radius, x1, y1+radius, x1, y1], **kwargs, smooth=True)
 
-    center_x, center_y = center_of_mass
-    canvas.create_oval(center_x - 20, center_y - 20, center_x + 20, center_y + 20, fill="yellow", outline="yellow",
-                       tags="center_of_mass")
-    drawn_bounds = (min_x, min_y, max_x, max_y)
-    draw_exits(rooms, exits)
+    def draw_room_with_shadow(self, x, y, room_id, room_name):
+        shadow_offset = 6
+        box_size = 20
+        tag_id = str(room_id)
 
+        shadow_tag = f"{tag_id}_shadow"
+        room_tag = f"{tag_id}_room"
+        self.create_rounded_rectangle(x - box_size + shadow_offset, y - box_size + shadow_offset,
+                                      x + box_size + shadow_offset, y + box_size + shadow_offset, radius=10,
+                                      fill="gray20",
+                                      tags=(shadow_tag,))
+        self.create_rounded_rectangle(x - box_size, y - box_size, x + box_size, y + box_size, radius=10,
+                                      fill=self.room_color, tags=(room_tag,))
 
-def on_mousewheel(event):
-    scale = 1.0
-    x = canvas.canvasx(event.x)
-    y = canvas.canvasy(event.y)
-    factor = 1.001 ** event.delta
-    canvas.scale(tk.ALL, x, y, factor, factor)
-    scale *= factor
-    adjust_scrollregion()
+        self.this.tag_bind(room_tag, "<Enter>", lambda e, id=room_id: self.show_room_name(e, id))
+        self.this.tag_bind(room_tag, "<Leave>", self.hide_room_name)
 
-def on_middle_click(event):
-    canvas.scan_mark(event.x, event.y)
+    def draw_exits(self, rooms, exits):
+        bidirectional = set()
+        exits_tuples = {(exit.FromID, exit.ToID) for exit in exits}
 
-def on_middle_move(event):
-    canvas.scan_dragto(event.x, event.y, gain=1)
+        for exit in exits_tuples:
+            from_id, to_id = exit
+            if (to_id, from_id) in exits_tuples:
+                bidirectional.add(exit)
 
-def adjust_scrollregion():
-    canvas.configure(scrollregion=canvas.bbox(tk.ALL))
+        for exit in exits_tuples:
+            from_id, to_id = exit
+            from_pos = next((room[1:3] for room in rooms if room[0] == from_id), None)
+            to_pos = next((room[1:3] for room in rooms if room[0] == to_id), None)
+            if from_pos and to_pos:
+                if exit in bidirectional:
+                    self.this.create_line(from_pos[0], from_pos[1], to_pos[0], to_pos[1], fill=self.room_color)
+                else:
+                    self.this.create_line(from_pos[0], from_pos[1], to_pos[0], to_pos[1], arrow=tk.LAST, fill=self.room_color)
 
-def focus_point(x, y):
-    canvas.update_idletasks()
-    canvas_width = canvas.winfo_width()
-    canvas_height = canvas.winfo_height()
+    def draw_map(self, rooms, exits):
+        total_x, total_y, count = 0, 0, 0
+        count = 0
+        room_size = 20
+        shadow_offset = 6
+        extra_padding = 10
 
-    scale_x = canvas_width / (drawn_bounds[2] - drawn_bounds[0])
-    scale_y = canvas_height / (drawn_bounds[3] - drawn_bounds[1])
-    scale = min(scale_x, scale_y, 1) * 0.8
+        offset = room_size + shadow_offset + extra_padding
+        min_x, min_y, max_x, max_y = float('inf'), float('inf'), float('-inf'), float('-inf')
 
-    scaled_x = (x - drawn_bounds[0]) * scale
-    scaled_y = (y - drawn_bounds[1]) * scale
+        for room_id, x, y, name in rooms:
+            # Corrected: Removed the extra 'self' from the call
+            self.draw_room_with_shadow(x, y, str(room_id), name)
+            min_x, min_y = min(min_x, x - offset), min(min_y, y - offset)
+            max_x, max_y = max(max_x, x + offset), max(max_y, y + offset)
+            total_x += x
+            total_y += y
+            count += 1
 
-    move_x = max(0, scaled_x - canvas_width / 2)
-    move_y = max(0, scaled_y - canvas_height / 2)
+        if count > 0:
+            self.center_of_mass = (total_x / count, total_y / count)
 
-    canvas.xview_moveto(move_x / (canvas_width * scale))
-    canvas.yview_moveto(move_y / (canvas_height * scale))
-    adjust_scrollregion()
+        center_x, center_y = self.center_of_mass
+        self.this.create_oval(center_x - 20, center_y - 20, center_x + 20, center_y + 20, fill="yellow",
+                              outline="yellow",
+                              tags="center_of_mass")
+        self.drawn_bounds = (min_x, min_y, max_x, max_y)
+        self.draw_exits(rooms, exits)
 
-def center_and_zoom_out_map():
-    global drawn_bounds, center_of_mass
-    if not drawn_bounds:
-        return
+    def on_mousewheel(self, event):
+        scale = 1.0
+        x = self.this.canvasx(event.x)
+        y = self.this.canvasy(event.y)
 
-    canvas.update_idletasks()
-    canvas_width = canvas.winfo_width()
-    canvas_height = canvas.winfo_height()
+        factor = 1.001 ** event.delta
+        self.this.scale(tk.ALL, x, y, factor, factor)
+        scale *= factor
+        self.adjust_scrollregion()
 
-    x,y = center_of_mass
-    focus_point(x,y)
+    def on_middle_click(self, event):
+        self.this.scan_mark(event.x, event.y)
 
-def on_zone_select(event):
-    if not event.widget.curselection():
-        return
-    index = event.widget.curselection()[0]
-    zone_name = event.widget.get(index)
-    zone_id = zone_dict[zone_name]
-    rooms = fetch_rooms(zone_id)
-    exits = fetch_exits([room[0] for room in rooms])
+    def on_middle_move(self, event):
+        self.this.scan_dragto(event.x, event.y, gain=1)
 
-    if not rooms:
-        print("No rooms found for this zone.")
-        return
+    def adjust_scrollregion(self):
+        self.this.configure(scrollregion=self.this.bbox(tk.ALL))
 
-    canvas.delete("all")
-    draw_map(rooms, exits)
-    center_and_zoom_out_map()
+    def focus_point(self,x, y):
+        self.this.update_idletasks()
+        this_width = self.this.winfo_width()
+        this_height = self.this.winfo_height()
 
-def show_room_name(event, room_id):
-    global tooltip
-    room_name = fetch_room_name(room_id)
-    if tooltip:
-        canvas.delete(tooltip)
-    x, y = canvas.canvasx(event.x), canvas.canvasy(event.y)
-    tooltip = canvas.create_text(x+20, y, text=room_name, fill="black", font=("Arial", "10", "bold"))
+        scrollregion = self.this.bbox("all")
+        if scrollregion is None:
+            print("No scroll region set.")
+            return
 
-def hide_room_name(event):
-    global tooltip
-    if tooltip:
-        canvas.delete(tooltip)
-        tooltip = None
+        scrollregion_width = scrollregion[2] - scrollregion[0]
+        scrollregion_height = scrollregion[3] - scrollregion[1]
 
-def select_default_zone(zone_listbox):
-    try:
-        index = list(zone_dict.keys()).index(DEFAULT_ZONE)
-        zone_listbox.select_set(index)
-        zone_listbox.event_generate("<<ListboxSelect>>")
-    except ValueError:
-        print(f"Default zone '{DEFAULT_ZONE}' not found.")
+        center_fraction_x = (x - scrollregion[0]) / scrollregion_width
+        center_fraction_y = (y - scrollregion[1]) / scrollregion_height
 
-def create_zone_listbox():
-    zones = sorted(fetch_zones(), key=lambda x: x[1])
-    global zone_dict
-    zone_dict = {zone[1]: zone[0] for zone in zones}
+        half_view_fraction_x = this_width / (2 * scrollregion_width)
+        half_view_fraction_y = this_height / (2 * scrollregion_height)
 
-    zone_listbox = tk.Listbox(left_panel, height=len(zones))
-    for zone_name, _ in zone_dict.items():
-        zone_listbox.insert(tk.END, zone_name)
-    zone_listbox.pack(side=tk.TOP, fill=tk.BOTH, expand=True, padx=5, pady=5)
-    zone_listbox.bind('<<ListboxSelect>>', on_zone_select)
-    return zone_listbox
+        final_scroll_x = center_fraction_x - half_view_fraction_x
+        final_scroll_y = center_fraction_y - half_view_fraction_y
+        final_scroll_x = max(0, min(final_scroll_x, 1))
+        final_scroll_y = max(0, min(final_scroll_y, 1))
 
-root = tk.Tk()
-root.title("Map Viewer")
-root.geometry("1200x600")
+        self.this.xview_moveto(final_scroll_x)
+        self.this.yview_moveto(final_scroll_y)
 
-pane = ttk.PanedWindow(root, orient=tk.HORIZONTAL)
-pane.pack(fill=tk.BOTH, expand=True)
+    def center_and_zoom_out_map(self):
+        if not self.drawn_bounds:
+            return
+        x, y = self.center_of_mass
+        self.focus_point(x, y)
 
-left_panel = ttk.Frame(pane, width=120)
-right_panel = ttk.Frame(pane, width=1080)
+    def on_zone_select(self,event):
+        if not self.zone_listbox.curselection():
+            return
+        index = self.zone_listbox.curselection()[0]
+        zone_name = self.zone_listbox.get(index)
+        zone_id = self.zone_dict[zone_name]
+        rooms = fetch_rooms(zone_id)
+        exits = fetch_exits([room[0] for room in rooms])
 
-pane.add(left_panel, weight=1)
-pane.add(right_panel, weight=5)
+        if not rooms:
+            print("No rooms found for this zone.")
+            return
 
-canvas = tk.Canvas(right_panel, bg='lightgray')
-canvas.pack(fill=tk.BOTH, expand=True)
+        self.this.delete("all")
+        self.draw_map(rooms, exits)
+        self.center_and_zoom_out_map()
 
-canvas.bind("<MouseWheel>", on_mousewheel)
-canvas.bind("<Button-2>", on_middle_click)
-canvas.bind("<B2-Motion>", on_middle_move)
+    def show_room_name(self, event, room_id):
+        room_name = fetch_room_name(room_id)
+        if self.tooltip:
+            self.this.delete(self.tooltip)
+        x, y = self.this.canvasx(event.x), self.this.canvasy(event.y)
+        self.tooltip = self.this.create_text(x+20, y, text=room_name, fill="black", font=("Arial", "10", "bold"))
 
-zone_listbox = create_zone_listbox()
-root.mainloop()
+    def hide_room_name(self, event):
+        if self.tooltip:
+            self.this.delete(self.tooltip)
+            self.tooltip = None
+
+    def select_default_zone(self,zone_listbox):
+        try:
+            index = list(self.zone_dict.keys()).index(self.default_zone)
+            zone_listbox.select_set(index)
+            zone_listbox.event_generate("<<ListboxSelect>>")
+        except ValueError:
+            print(f"Default zone '{self.default_zone}' not found.")
+

@@ -1,34 +1,39 @@
 #mainwindow.py
 import tkinter as tk
+from tkinter import ttk
 from network.connection import MUDConnection
 from config.settings import load_config
-
+from core.map import MapViewer
 
 class MainWindow:
     def __init__(self, root):
+        self.root = root
+        self.initialize_window()
         self.update_buffer = []
         self.update_pending = False
         self.config = load_config()
-        self.root = root
         self.setup_ui()
         self.setup_bindings()
         self.connection = MUDConnection(self.display_message, self.on_login_success)
         self.connection.connect()
+        self.map_viewer = None
+
+    def initialize_window(self):
+        self.root.title("MUD Client with Map")
+        self.root.geometry("1200x600")
 
     def setup_ui(self):
-        self.root.title("MUD Client")
-        self.root.geometry("800x600")
-        bg_color = self.config.get('Font', 'background_color')
-        font_color = self.config.get('Font', 'color')
-        self.text_area = tk.Text(self.root, wrap=tk.WORD, state='disabled', bg=bg_color, fg=font_color)
-        self.text_area.pack(fill=tk.BOTH, expand=True, side=tk.TOP)
-        self.ansi_colors = self.load_ansi_colors()
-        self.create_color_tags()
-        self.input_area = tk.Entry(self.root)
-        self.input_area.pack(fill=tk.X, side=tk.BOTTOM)
-        self.input_area.bind("<Return>", self.send_input)
-        self.text_area.bind("<1>", lambda event: self.input_area.focus())
-        self.text_area.bind("<Control-c>", self.copy_text)
+        pane = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
+        pane.pack(fill=tk.BOTH, expand=True)
+
+        console_frame = ttk.Frame(pane, width=400)
+        self.setup_console_ui(console_frame)
+        pane.add(console_frame, weight=1)
+
+        map_frame = ttk.Frame(pane, width=600)
+        self.map_viewer = MapViewer(map_frame, pane)
+        pane.add(map_frame, weight=2)
+        self.map_viewer.this.pack(fill=tk.BOTH, expand=True)
 
     def setup_bindings(self):
         self.root.bind("<Control-c>", lambda event: self.copy_text(event))
@@ -40,10 +45,12 @@ class MainWindow:
             self.root.clipboard_append(selected_text)
         except tk.TclError:
             pass
+
     def on_login_success(self):
         initial_commands = self.config.get('InitialCommands', 'commands').split(',')
         for command in initial_commands:
             self.connection.send(command.strip())
+
     def load_ansi_colors(self):
         colors = {}
         if self.config.has_section('ANSIColors'):
@@ -68,7 +75,6 @@ class MainWindow:
         current_color = None
         buffer = ""
         i = 0
-
         while i < len(message):
             if message[i] == '\x1b' and message[i + 1:i + 2] == '[':
                 end_idx = message.find('m', i)
@@ -119,3 +125,22 @@ class MainWindow:
         initial_commands = self.config.get('InitialCommands', 'commands').split(',')
         for command in initial_commands:
             self.connection.send(command.strip())
+
+    def setup_console_ui(self, console_frame):
+        bg_color = self.config.get('Font', 'background_color')
+        font_color = self.config.get('Font', 'color')
+        self.text_area = tk.Text(console_frame, wrap=tk.WORD, state='disabled', bg=bg_color, fg=font_color)
+        self.text_area.pack(fill=tk.BOTH, expand=True, side=tk.TOP)
+        self.ansi_colors = self.load_ansi_colors()
+        self.create_color_tags()
+        self.input_area = tk.Entry(console_frame)
+        self.input_area.pack(fill=tk.X, side=tk.BOTTOM)
+        self.input_area.bind("<Return>", self.send_input)
+        self.text_area.bind("<1>", lambda event: self.input_area.focus())
+        self.text_area.bind("<Control-c>", self.copy_text)
+
+    def setup_zone_ui(self, zone_frame):
+        self.zone_listbox = tk.Listbox(zone_frame, height=10)
+        self.zone_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        self.populate_zones()
+        self.zone_listbox.bind('<<ListboxSelect>>', self.map_viewer.on_zone_select)
