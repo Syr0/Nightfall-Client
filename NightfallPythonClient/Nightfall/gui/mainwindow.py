@@ -1,9 +1,8 @@
 #mainwindow.py
 import tkinter as tk
-from tkinter import font as tkfont
 from network.connection import MUDConnection
 from config.settings import load_config
-import re
+
 
 class MainWindow:
     def __init__(self, root):
