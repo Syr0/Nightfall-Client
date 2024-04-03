@@ -4,6 +4,8 @@ from tkinter import ttk
 from network.connection import MUDConnection
 from config.settings import load_config
 from core.map import MapViewer
+from tkinter import PhotoImage
+from core.autowalker import AutoWalker
 
 class MainWindow:
     def __init__(self, root):
@@ -14,9 +16,11 @@ class MainWindow:
         self.config = load_config()
         self.setup_ui()
         self.setup_bindings()
-        self.connection = MUDConnection(self.display_message, self.on_login_success)
+        self.connection = MUDConnection(self.handle_message, self.on_login_success)
         self.connection.connect()
         self.map_viewer = None
+        self.setup_toolbar()
+        self.auto_walker = AutoWalker(self.map_viewer)
 
     def initialize_window(self):
         self.root.title("MUD Client with Map")
@@ -118,8 +122,9 @@ class MainWindow:
         self.update_buffer = []
         self.update_pending = False
 
-    def display_message(self, message):
+    def handle_message(self, message):
         self.ANSI_Color_Text(message)
+        self.auto_walker.analyze_response(message)
 
     def on_login_success(self):
         initial_commands = self.config.get('InitialCommands', 'commands').split(',')
@@ -144,3 +149,16 @@ class MainWindow:
         self.zone_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.populate_zones()
         self.zone_listbox.bind('<<ListboxSelect>>', self.map_viewer.on_zone_select)
+
+    def setup_toolbar(self):
+        toolbar = tk.Frame(self.root, bd=1, relief=tk.RAISED)
+        self.update_pos_img = PhotoImage(file="gui/route.png",width=20, height=20)
+        self.update_pos_toggle_btn = tk.Button(toolbar, text="Update Position", image=self.update_pos_img, relief=tk.FLAT,
+                                               command=self.toggle_update_position)
+        self.update_pos_toggle_btn.pack(side=tk.LEFT, padx=2, pady=2)
+        toolbar.pack(side=tk.TOP, fill=tk.X)
+
+        self.update_position_active = False
+
+    def toggle_update_position(self):
+        self.update_position_active = not self.update_position_active

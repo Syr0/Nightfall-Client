@@ -71,3 +71,42 @@ def fetch_room_name(room_id):
         if row:
             room_name_cache[room_id] = row[0]
             return row[0]
+def fetch_room_descriptions():
+    global room_description_cache
+    if room_description_cache:
+        return room_description_cache
+
+    with open_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT ObjID, Desc FROM ObjectTbl")
+        for row in cursor.fetchall():
+            room_description_cache[row[0]] = row[1]
+    return room_description_cache
+
+def fetch_connected_rooms(current_room_id):
+    connected_room_descriptions = {}
+
+    with open_db_connection() as conn:
+        cursor = conn.cursor()
+
+        cursor.execute("""
+            SELECT ToID
+            FROM ExitTbl
+            WHERE FromID = ?
+        """, (current_room_id,))
+        connected_room_ids = [row.ToID for row in cursor.fetchall()]
+
+        if not connected_room_ids:
+            return connected_room_descriptions
+
+        placeholders = ', '.join('?' for _ in connected_room_ids)
+        query = f"""
+            SELECT ObjID, Desc
+            FROM ObjectTbl
+            WHERE ObjID IN ({placeholders})
+        """
+        cursor.execute(query, connected_room_ids)
+        for row in cursor.fetchall():
+            connected_room_descriptions[row.ObjID] = row.Desc.strip().replace('\r\n', ' ').replace('\n', ' ')
+
+    return connected_room_descriptions
