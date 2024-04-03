@@ -6,6 +6,8 @@ import configparser
 from tkinter import ttk
 from core.database import fetch_rooms, fetch_zones, fetch_exits, fetch_room_name
 
+from gui.tooltip import ToolTip
+
 class MapViewer:
     def __init__(self, parent, main_pane):
         self.parent = parent
@@ -20,6 +22,8 @@ class MapViewer:
         self.zone_dict = self.fetch_zone_dict()
         self.setup_bindings()
         self.initialize_ui()
+        self.tooltips = {}
+
 
     def initialize_ui(self):
         zone_listbox_frame = ttk.Frame(self.main_pane, width=200)
@@ -156,6 +160,22 @@ class MapViewer:
     def adjust_scrollregion(self):
         self.this.configure(scrollregion=self.this.bbox(tk.ALL))
 
+    def show_room_name(self, event, room_id):
+        room_name = fetch_room_name(room_id)
+        if room_id not in self.tooltips:
+            self.tooltips[room_id] = ToolTip(self.this)
+        self.tooltips[room_id].show_tip(room_name)
+        self.this.bind("<Motion>", lambda e: self.update_tooltip_position(e, room_id))
+
+    def update_tooltip_position(self, event, room_id):
+        if room_id in self.tooltips:
+            self.tooltips[room_id].show_tip(fetch_room_name(room_id))
+
+    def hide_room_name(self, event):
+        for tooltip in self.tooltips.values():
+            tooltip.hide_tip()
+        self.this.unbind("<Motion>")
+
     def focus_point(self,x, y):
         self.this.update_idletasks()
         this_width = self.this.winfo_width()
@@ -208,15 +228,13 @@ class MapViewer:
 
     def show_room_name(self, event, room_id):
         room_name = fetch_room_name(room_id)
-        if self.tooltip:
-            self.this.delete(self.tooltip)
-        x, y = self.this.canvasx(event.x), self.this.canvasy(event.y)
-        self.tooltip = self.this.create_text(x+20, y, text=room_name, fill="black", font=("Arial", "10", "bold"))
+        if room_id not in self.tooltips:
+            self.tooltips[room_id] = ToolTip(self.this)
+        self.tooltips[room_id].show_tip(room_name, event.x, event.y)
 
     def hide_room_name(self, event):
-        if self.tooltip:
-            self.this.delete(self.tooltip)
-            self.tooltip = None
+        for tooltip in self.tooltips.values():
+            tooltip.hide_tip()
 
     def select_default_zone(self,zone_listbox):
         try:
