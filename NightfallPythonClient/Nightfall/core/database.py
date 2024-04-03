@@ -20,6 +20,7 @@ def find_access_driver():
 db_file = r"C:\Program Files (x86)\zMUD\nightfall\Map\Map.mdb"
 room_description_cache = {}
 access_driver = (find_access_driver())
+room_name_cache = {}
 
 if access_driver is None:
     print("Microsoft Access Driver not found.")
@@ -52,14 +53,21 @@ def fetch_exits(from_obj_ids):
         cursor.execute(f"SELECT FromID, ToID FROM ExitTbl WHERE FromID IN ({placeholders})", from_obj_ids)
         exits = cursor.fetchall()
     return exits
-def fetch_room_description(room_id):
-    if room_id in room_description_cache:
-        return room_description_cache[room_id]
+
+def fetch_zone_bounds(zone_id):
+    with open_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT MinX, MinY, MaxX, MaxY FROM ZoneTbl WHERE ZoneID = ?", (zone_id,))
+        return cursor.fetchone()
+
+def fetch_room_name(room_id):
+    if room_id in room_name_cache:
+        return room_name_cache[room_id]
 
     with open_db_connection() as conn:
         cursor = conn.cursor()
-        cursor.execute("SELECT Desc FROM ObjectTbl WHERE ObjID = ?", (room_id,))
-        desc = cursor.fetchone()
-        if desc:
-            room_description_cache[room_id] = desc[0]
-            return desc[0]
+        cursor.execute("SELECT Name FROM ObjectTbl WHERE ObjID = ?", (room_id,))
+        row = cursor.fetchone()
+        if row:
+            room_name_cache[room_id] = row[0]
+            return row[0]

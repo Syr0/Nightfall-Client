@@ -4,11 +4,13 @@ import tkinter as tk
 import configparser
 
 from tkinter import ttk
-from core.database import fetch_rooms, fetch_zones, fetch_exits
+from core.database import fetch_rooms, fetch_zones, fetch_exits, fetch_room_name
 
 prev_x = None
 prev_y = None
 tooltip = None
+drawn_bounds = None
+center_of_mass = (0, 0)
 
 config_file_path = os.path.join(os.path.dirname(__file__), '../config/settings.ini')
 
@@ -65,12 +67,35 @@ def draw_exits(rooms, exits):
             else:
                 canvas.create_line(from_pos[0], from_pos[1], to_pos[0], to_pos[1], arrow=tk.LAST, fill=ROOM_COLOR)
 
-
 def draw_map(rooms, exits):
+    global drawn_bounds, center_of_mass
+    total_x, total_y, count = 0, 0, 0
+    count = 0
+    room_size = 20
+    shadow_offset = 6
+    extra_padding = 10
+
+    offset = room_size + shadow_offset + extra_padding
+    min_x, min_y, max_x, max_y = float('inf'), float('inf'), float('-inf'), float('-inf')
+
     for room_id, x, y, name in rooms:
         draw_room_with_shadow(canvas, x, y, str(room_id), name)
+        min_x, min_y = min(min_x, x - offset), min(min_y, y - offset)
+        max_x, max_y = max(max_x, x + offset), max(max_y, y + offset)
+        total_x += x
+        total_y += y
+        count += 1
 
-    draw_exits(rooms,exits)
+    if count > 0:
+        center_of_mass = (total_x / count, total_y / count)
+
+    center_x, center_y = center_of_mass
+    canvas.create_oval(center_x - 5, center_y - 5, center_x + 5, center_y + 5, fill="yellow", outline="yellow",
+                       tags="center_of_mass")
+
+    drawn_bounds = (min_x, min_y, max_x, max_y)
+    draw_exits(rooms, exits)
+
 
 def on_mousewheel(event):
     scale = 1.0
@@ -90,24 +115,47 @@ def on_middle_move(event):
 def adjust_scrollregion():
     canvas.configure(scrollregion=canvas.bbox(tk.ALL))
 
-def center_and_zoom_out_map():
+def focus_point(x, y):
     canvas.update_idletasks()
-    bounds = canvas.bbox("all")
-    if bounds:
-        width = bounds[2] - bounds[0]
-        height = bounds[3] - bounds[1]
-        x_center = (bounds[0] + bounds[2]) / 2
-        y_center = (bounds[1] + bounds[3]) / 2
-        canvas_width = canvas.winfo_width()
-        canvas_height = canvas.winfo_height()
+    canvas_width = canvas.winfo_width()
+    canvas_height = canvas.winfo_height()
 
-        scale_x = canvas_width / width
-        scale_y = canvas_height / height
-        scale = min(scale_x, scale_y) * 0.8
+    scale_x = canvas_width / (drawn_bounds[2] - drawn_bounds[0])
+    scale_y = canvas_height / (drawn_bounds[3] - drawn_bounds[1])
+    scale = min(scale_x, scale_y, 1) * 0.8
 
-        canvas.scale("all", 0, 0, scale, scale)
+    scaled_x = (x - drawn_bounds[0]) * scale
+    scaled_y = (y - drawn_bounds[1]) * scale
 
-        canvas.scan_dragto(int(x_center * scale - canvas_width / 2), int(y_center * scale - canvas_height / 2), gain=1)
+    move_x = max(0, scaled_x - canvas_width / 2)
+    move_y = max(0, scaled_y - canvas_height / 2)
+
+    canvas.xview_moveto(move_x / (canvas_width * scale))
+    canvas.yview_moveto(move_y / (canvas_height * scale))
+    adjust_scrollregion()
+
+def center_and_zoom_out_map():
+    global drawn_bounds, center_of_mass
+    if not drawn_bounds:
+        return
+
+    canvas.update_idletasks()
+    canvas_width = canvas.winfo_width()
+    canvas_height = canvas.winfo_height()
+
+    min_x, min_y, max_x, max_y = drawn_bounds
+    scale_x = canvas_width / (max_x - min_x)
+    scale_y = canvas_height / (max_y - min_y)
+    scale = min(scale_x, scale_y, 1)
+
+    canvas.scale("all", 0, 0, scale, scale)
+
+    scaled_center_x = center_of_mass[0] * scale
+    scaled_center_y = center_of_mass[1] * scale
+
+    canvas.xview_moveto(max(0, (scaled_center_x - canvas_width / 2) / (canvas_width * scale)))
+    canvas.yview_moveto(max(0, (scaled_center_y - canvas_height / 2) / (canvas_height * scale)))
+    adjust_scrollregion()
 
 
 def on_zone_select(event):
@@ -125,12 +173,15 @@ def on_zone_select(event):
 
     canvas.delete("all")
     draw_map(rooms, exits)
-def show_room_name(event, name):
+    center_and_zoom_out_map()
+
+def show_room_name(event, room_id):
     global tooltip
+    room_name = fetch_room_name(room_id)
     if tooltip:
         canvas.delete(tooltip)
     x, y = canvas.canvasx(event.x), canvas.canvasy(event.y)
-    tooltip = canvas.create_text(x+20, y, text=name, fill="black", font=("Arial", "10", "bold"))
+    tooltip = canvas.create_text(x+20, y, text=room_name, fill="black", font=("Arial", "10", "bold"))
 
 def hide_room_name(event):
     global tooltip
