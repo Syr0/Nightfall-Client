@@ -4,14 +4,15 @@ import tkinter as tk
 import configparser
 
 from tkinter import ttk
-from core.database import fetch_rooms, fetch_zones, fetch_exits, fetch_room_name
+from core.database import fetch_rooms, fetch_zones, fetch_exits, fetch_room_name, fetch_room_position
 
 from gui.tooltip import ToolTip
 
 class MapViewer:
-    def __init__(self, parent, main_pane):
+    def __init__(self, parent, pane, root):
         self.parent = parent
-        self.main_pane = main_pane
+        self.pane = pane
+        self.root = root
         self.load_config()
 
         self.this = tk.Canvas(self.parent, bg=self.background_color)
@@ -23,13 +24,13 @@ class MapViewer:
         self.tooltips = {}
 
     def initialize_ui(self):
-        zone_listbox_frame = ttk.Frame(self.main_pane, width=200)
+        zone_listbox_frame = ttk.Frame(self.pane, width=200)
         self.zone_listbox = tk.Listbox(zone_listbox_frame, height=10)
         for zone_name in sorted(self.zone_dict.keys()):
             self.zone_listbox.insert(tk.END, zone_name)
         self.zone_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.zone_listbox.bind('<<ListboxSelect>>', self.on_zone_select)
-        self.main_pane.add(zone_listbox_frame, weight=1)
+        self.pane.add(zone_listbox_frame, weight=1)
 
     def set_parent(self, parent):
         self.parent = parent
@@ -70,6 +71,7 @@ class MapViewer:
         rooms = fetch_rooms(zone_id)
         exits = fetch_exits([room[0] for room in rooms])
         self.draw_map(rooms, exits)
+        self.displayed_zone_id = zone_id
 
     def create_rounded_rectangle(self, x1, y1, x2, y2, radius=25, **kwargs):
         return self.this.create_polygon([x1+radius, y1, x2-radius, y1, x2, y1, x2, y1+radius, x2, y2-radius, x2, y2, x2-radius, y2, x1+radius, y2, x1, y2, x1, y2-radius, x1, y1+radius, x1, y1], **kwargs, smooth=True)
@@ -178,6 +180,15 @@ class MapViewer:
             tooltip.hide_tip()
         self.this.unbind("<Motion>")
 
+    def set_current_room(self, room_id):
+        if self.current_room_id is not None:
+            self.map_viewer.unhighlight_room(self.current_room_id)
+        self.current_room_id = room_id
+        self.map_viewer.highlight_room(room_id)
+        room_position = fetch_room_position(room_id)
+        if room_position:
+            self.map_viewer.root.after(0, lambda: self.map_viewer.focus_point(*room_position))
+
     def focus_point(self,x, y):
         self.this.update_idletasks()
         this_width = self.this.winfo_width()
@@ -246,3 +257,14 @@ class MapViewer:
         except ValueError:
             print(f"Default zone '{self.default_zone}' not found.")
 
+    def unhighlight_room(self, room_id):
+        room_tag = f"{room_id}_room"
+        self.this.itemconfig(room_tag, fill=self.room_color)
+
+    def highlight_room(self, room_id):
+        if hasattr(self, 'current_highlight'):
+            self.unhighlight_room(self.current_highlight)
+        self.current_highlight = room_id
+
+        room_tag = f"{room_id}_room"
+        self.this.itemconfig(room_tag, fill="#FF6EC7")

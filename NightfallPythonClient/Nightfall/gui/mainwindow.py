@@ -15,16 +15,22 @@ class MainWindow:
         self.update_pending = False
         self.config = load_config()
         self.setup_ui()
+        self.load_trigger_commands()
         self.setup_bindings()
         self.connection = MUDConnection(self.handle_message, self.on_login_success)
         self.connection.connect()
-        self.map_viewer = None
-        self.setup_toolbar()
         self.auto_walker = AutoWalker(self.map_viewer)
+        self.setup_toolbar()
+        self.update_position_active = False
+        self.awaiting_response_for_command = False
 
     def initialize_window(self):
         self.root.title("MUD Client with Map")
         self.root.geometry("1200x600")
+
+    def load_trigger_commands(self):
+        commands_str = self.config.get('TriggerCommands', 'commands', fallback="l,look,n,w,s,e,north,west,east,south,up,down,u,d,enter,leave")
+        self.trigger_commands = [cmd.strip() for cmd in commands_str.split(',')]
 
     def setup_ui(self):
         pane = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
@@ -35,7 +41,7 @@ class MainWindow:
         pane.add(console_frame, weight=1)
 
         map_frame = ttk.Frame(pane, width=600)
-        self.map_viewer = MapViewer(map_frame, pane)
+        self.map_viewer = MapViewer(map_frame, pane, self.root)
         pane.add(map_frame, weight=2)
         self.map_viewer.this.pack(fill=tk.BOTH, expand=True)
 
@@ -67,12 +73,13 @@ class MainWindow:
             self.text_area.tag_configure(code, foreground=color)
 
     def send_input(self, event):
-        input_text = self.input_area.get()
-        self.connection.send(input_text)
+        input_text = self.input_area.get().split()
+        if input_text:
+            input_text = input_text[0]
+            if input_text in self.trigger_commands:
+                self.awaiting_response_for_command = True
+            self.connection.send(self.input_area.get())
         self.input_area.delete(0, tk.END)
-
-    def debug_ansi_codes(self, text):
-        print(" ".join(f"{ord(c):02x}" for c in text))
 
     def ANSI_Color_Text(self, message):
         self.ansi_colors = self.load_ansi_colors()
@@ -124,7 +131,9 @@ class MainWindow:
 
     def handle_message(self, message):
         self.ANSI_Color_Text(message)
-        self.auto_walker.analyze_response(message)
+        if self.awaiting_response_for_command:
+            self.auto_walker.analyze_response(message)
+            self.awaiting_response_for_command = False
 
     def on_login_success(self):
         initial_commands = self.config.get('InitialCommands', 'commands').split(',')
@@ -151,14 +160,17 @@ class MainWindow:
         self.zone_listbox.bind('<<ListboxSelect>>', self.map_viewer.on_zone_select)
 
     def setup_toolbar(self):
-        toolbar = tk.Frame(self.root, bd=1, relief=tk.RAISED)
-        self.update_pos_img = PhotoImage(file="gui/route.png",width=20, height=20)
-        self.update_pos_toggle_btn = tk.Button(toolbar, text="Update Position", image=self.update_pos_img, relief=tk.FLAT,
-                                               command=self.toggle_update_position)
+        bg_color = self.config.get('Visuals', 'BackgroundColor', fallback='white')
+        self.toolbar = tk.Frame(self.map_viewer.this.master, bd=1, relief=tk.RAISED, bg=bg_color)
+        self.update_pos_toggle_btn = tk.Button(self.toolbar, text="Toggle", bg="lightgrey",
+                                               command=self.toggle_update_position, width=5, height=1)
         self.update_pos_toggle_btn.pack(side=tk.LEFT, padx=2, pady=2)
-        toolbar.pack(side=tk.TOP, fill=tk.X)
-
-        self.update_position_active = False
+        self.toolbar.pack(side=tk.TOP, fill=tk.X, before=self.map_viewer.this)
 
     def toggle_update_position(self):
         self.update_position_active = not self.update_position_active
+        self.auto_walker.toggle_active()
+        if self.auto_walker.is_active():
+            self.update_pos_toggle_btn.config(bg="green")
+        else:
+            self.update_pos_toggle_btn.config(bg="lightgrey")

@@ -1,12 +1,10 @@
 #database.py
 import webbrowser
 import pyodbc
+import time
 
-def find_access_driver():
-    for driver in pyodbc.drivers():
-        if 'ACCESS' in driver.upper():
-            return driver
-    return None
+MAX_RETRIES = 3
+RETRY_DELAY = 1
 
 #DATABASE Explaination
 #DirTbl maps Direction strings to DirRefs (IDs) and Revids(reverse travel). And Dx,Dy,Dz gives information where this direction needs to be placed on the mapper (e,g, x+200 y-200 z=0)
@@ -19,25 +17,35 @@ def find_access_driver():
 
 db_file = r"C:\Program Files (x86)\zMUD\nightfall\Map\Map.mdb"
 room_description_cache = {}
-access_driver = (find_access_driver())
 room_name_cache = {}
 
-if access_driver is None:
-    print("Microsoft Access Driver not found.")
-    print("Please download and install the 64-bit Microsoft Access Database Engine 2016 Redistributable.")
-    webbrowser.open("https://www.microsoft.com/en-us/download/details.aspx?id=54920")
-else:
-    conn_str = f'DRIVER={{{access_driver}}};DBQ={db_file}'
+
+def find_access_driver():
+    for driver in pyodbc.drivers():
+        if 'ACCESS' in driver.upper():
+            return driver
+    return None
 
 def open_db_connection():
-    return pyodbc.connect(conn_str)
+    attempt = 0
+    while attempt < MAX_RETRIES:
+        try:
+            return pyodbc.connect(conn_str)
+        except pyodbc.Error as e:
+            print(f"Database connection failed: {e}. Retrying in {RETRY_DELAY} seconds...")
+            time.sleep(RETRY_DELAY)
+            attempt += 1
+    raise Exception("Failed to connect to the database after several attempts.")
 
 def fetch_zones():
-    with open_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT ZoneID, Name FROM ZoneTbl")
-        zones = cursor.fetchall()
-    return zones
+    try:
+        with open_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT ZoneID, Name FROM ZoneTbl")
+            return cursor.fetchall()
+    except Exception as e:
+        print(f"Error fetching zones: {e}")
+    return []
 
 def fetch_rooms(zone_id):
     with open_db_connection() as conn:
@@ -61,16 +69,22 @@ def fetch_zone_bounds(zone_id):
         return cursor.fetchone()
 
 def fetch_room_name(room_id):
-    if room_id in room_name_cache:
-        return room_name_cache[room_id]
+    try:
+        if room_id in room_name_cache:
+            return room_name_cache[room_id]
 
-    with open_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT Name FROM ObjectTbl WHERE ObjID = ?", (room_id,))
-        row = cursor.fetchone()
-        if row:
-            room_name_cache[room_id] = row[0]
-            return row[0]
+        with open_db_connection() as conn:
+            cursor = conn.cursor()
+            cursor.execute("SELECT Name FROM ObjectTbl WHERE ObjID = ?", (room_id,))
+            row = cursor.fetchone()
+            if row:
+                room_name_cache[room_id] = row[0]
+                return row[0]
+    except pyodbc.Error as e:
+        print(f"Database error while fetching room name: {e}")
+    except Exception as e:
+        print(f"Unexpected error while fetching room name: {e}")
+    return None
 def fetch_room_descriptions():
     global room_description_cache
     if room_description_cache:
@@ -82,6 +96,24 @@ def fetch_room_descriptions():
         for row in cursor.fetchall():
             room_description_cache[row[0]] = row[1]
     return room_description_cache
+
+def fetch_room_zone_id(room_id):
+    with open_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT ZoneID FROM ObjectTbl WHERE ObjID = ?", (room_id,))
+        result = cursor.fetchone()
+        if result:
+            return result[0]
+    return None
+
+def fetch_room_position(room_id):
+    with open_db_connection() as conn:
+        cursor = conn.cursor()
+        cursor.execute("SELECT X, Y FROM ObjectTbl WHERE ObjID = ?", (room_id,))
+        result = cursor.fetchone()
+        if result:
+            return result[0], result[1]
+    return None, None
 
 def fetch_connected_rooms(current_room_id):
     connected_room_descriptions = {}
@@ -110,3 +142,13 @@ def fetch_connected_rooms(current_room_id):
             connected_room_descriptions[row.ObjID] = row.Desc.strip().replace('\r\n', ' ').replace('\n', ' ')
 
     return connected_room_descriptions
+
+
+
+access_driver = (find_access_driver())
+if access_driver is None:
+    print("Microsoft Access Driver not found.")
+    print("Please download and install the 64-bit Microsoft Access Database Engine 2016 Redistributable.")
+    webbrowser.open("https://www.microsoft.com/en-us/download/details.aspx?id=54920")
+else:
+    conn_str = f'DRIVER={{{access_driver}}};DBQ={db_file}'

@@ -1,6 +1,8 @@
 # autowalker.py
 import threading
-from core.database import fetch_room_descriptions, fetch_connected_rooms
+from core.database import fetch_room_descriptions, fetch_connected_rooms, fetch_room_zone_id, fetch_room_position, \
+    fetch_room_name
+
 
 #Task
 #"If toogled on, ensure that every time a response comes from the game server, the strings inside are compared with all the descriptions of rooms connected to the current location (need to be specified, too). if it matches, set that new room to the current player position (and hightlight it).
@@ -12,8 +14,10 @@ class AutoWalker:
         self.active = False
         self.current_room_id = None
 
+    def is_active(self):
+        return self.active
+
     def set_current_room(self, room_id):
-        # Update and highlight the new room, unhighlight the previous
         if self.current_room_id is not None:
             self.map_viewer.unhighlight_room(self.current_room_id)
         self.current_room_id = room_id
@@ -28,21 +32,25 @@ class AutoWalker:
     def analyze_response(self, response):
         if not self.active:
             return
-
         threading.Thread(target=self._process_response, args=(response,)).start()
 
     def _process_response(self, response):
-        description = response if response else ""
-        description = description.replace("\n", " ").replace("\r", " ")
+        if not self.active or response is None:
+            return
+        description = " ".join(response.split()[1:7])
         words_in_response = set(description.split())
 
-        if self.current_room_id:
-            room_descriptions = fetch_connected_rooms(self.current_room_id)
-        else:
-            room_descriptions = fetch_room_descriptions()
+        room_descriptions = fetch_connected_rooms(
+            self.current_room_id) if self.current_room_id else fetch_room_descriptions()
 
         best_match = self._find_matching_room(words_in_response, room_descriptions)
         if best_match:
+            room_zone_id = fetch_room_zone_id(best_match)
+            room_x, room_y = fetch_room_position(best_match)
+            if room_zone_id != self.map_viewer.displayed_zone_id:
+                self.map_viewer.root.after(0, lambda: self.map_viewer.display_zone(room_zone_id))
+            if room_x is not None and room_y is not None:
+                self.map_viewer.root.after(0, lambda: self.map_viewer.focus_point(room_x, room_y))
             self.map_viewer.root.after(0, lambda: self.set_current_room(best_match))
 
     def _find_matching_room(self, words_in_response, room_descriptions):
@@ -50,10 +58,18 @@ class AutoWalker:
         max_common_words = 0
 
         for room_id, description in room_descriptions.items():
-            words_in_description = set(description.split())
+            if description is None:
+                continue
+            room_name = fetch_room_name(room_id) or ""
+            combined_text = description + " " + room_name
+            words_in_description = set(combined_text.split())
             common_words = words_in_response.intersection(words_in_description)
             if len(common_words) > max_common_words:
                 max_common_words = len(common_words)
                 best_match = room_id
 
-        return best_match if max_common_words >= 5 else None
+        if best_match is None:
+            print("Couldn't find any room with description")
+
+        return best_match
+
