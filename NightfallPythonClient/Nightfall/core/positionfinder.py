@@ -14,7 +14,6 @@ class AutoWalker:
         return self.active
 
     def set_current_room(self, room_id):
-        print(f"Setting current room: {room_id}")
         if self.current_room_id is not None:
             self.map_viewer.unhighlight_room(self.current_room_id)
         self.current_room_id = room_id
@@ -34,7 +33,6 @@ class AutoWalker:
         if not self.active or response is None:
             return
         description = " ".join(response.split())
-        print(f"Received response description: {description}")
         words_in_response = set(description.split())
 
         room_descriptions = fetch_connected_rooms(
@@ -47,10 +45,6 @@ class AutoWalker:
         best_match = self._find_matching_room(words_in_response, room_descriptions)
         if best_match:
             room_zone_id = fetch_room_zone_id(best_match)
-            zone_name = fetch_zone_name(room_zone_id)
-            room_x, room_y = fetch_room_position(best_match)
-            print(
-                f"Best match found: Room ID {best_match}, Zone ID {room_zone_id}, Position ({room_x}, {room_y})")  # Debug output
 
             if best_match != self.current_room_id:
                 self.map_viewer.root.after(0, lambda: self.set_current_room(best_match))

@@ -37,7 +37,7 @@ class MainWindow:
 
     def load_trigger_commands(self):
         commands_str = self.config.get('TriggerCommands', 'commands',
-                                       fallback="l,look,n,w,s,e,north,west,east,south,up,down,u,d,enter,leave")
+                                       fallback="l,look,n,w,s,e,ne,nw,se,sw,northwest,northeast,southeast,southwest,north,west,east,south,up,down,u,d,enter,leave,Your feet try to run away with you ...")
         self.trigger_commands = [cmd.strip() for cmd in commands_str.split(',')]
         self.room_reload_command = self.config.get('TriggerCommands', 'RoomReload', fallback='look')
 
