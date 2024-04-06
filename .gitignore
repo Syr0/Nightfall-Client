@@ -1,3 +1,8 @@
 
 NightfallPythonClient/Nightfall/config/settings.ini
 NightfallPythonClient/Nightfall/core/__pycache__/map.cpython-312.pyc
+NightfallPythonClient/Nightfall/core/__pycache__/autowalker.cpython-312.pyc
+NightfallPythonClient/Nightfall/core/__pycache__/database.cpython-312.pyc
+NightfallPythonClient/Nightfall/core/__pycache__/map.cpython-312.pyc
+NightfallPythonClient/Nightfall/gui/__pycache__/mainwindow.cpython-312.pyc
+NightfallPythonClient/Nightfall/gui/__pycache__/tooltip.cpython-312.pyc
