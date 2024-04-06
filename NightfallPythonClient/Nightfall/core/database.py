@@ -15,134 +15,64 @@ RETRY_DELAY = 1
 #PortalTbl contains all portals, ways that can be entered from anywhere and cannot be drawn as such.
 #ZoneTbl contains the Zones of the map. ZoneID references it Name is the caption. MinX MinY MaxX and MaxY show the total size of the zone. Dx and Dy the position and XOffset and YOffset how much they need to be movr to match upper and lower layers.X and Y seems to be the latest view center
 
-db_file = r"C:\Program Files (x86)\zMUD\nightfall\Map\Map.mdb"
-room_description_cache = {}
-room_name_cache = {}
-
+DB_FILE  = r"..\..\Map.mdb"
+ROOM_DESCRIPTION_CACHE = {}
+ROOM_NAME_CACHE = {}
 
 def find_access_driver():
-    for driver in pyodbc.drivers():
-        if 'ACCESS' in driver.upper():
-            return driver
-    return None
+    return next((driver for driver in pyodbc.drivers() if 'ACCESS' in driver.upper()), None)
 
-def open_db_connection():
-    attempt = 0
-    while attempt < MAX_RETRIES:
+def execute_query(query, params=(), fetch_one=False):
+    conn_str = f'DRIVER={{{find_access_driver()}}};DBQ={DB_FILE}'
+    for attempt in range(MAX_RETRIES):
         try:
-            return pyodbc.connect(conn_str)
+            with pyodbc.connect(conn_str) as conn:
+                cursor = conn.cursor()
+                cursor.execute(query, params)
+                return cursor.fetchone() if fetch_one else cursor.fetchall()
         except pyodbc.Error as e:
-            print(f"Database connection failed: {e}. Retrying in {RETRY_DELAY} seconds...")
-            time.sleep(RETRY_DELAY)
-            attempt += 1
-    raise Exception("Failed to connect to the database after several attempts.")
+            if attempt < MAX_RETRIES - 1:
+                print(f"Database error: {e}. Retrying in {RETRY_DELAY} seconds...")
+                time.sleep(RETRY_DELAY)
+            else:
+                raise
+    return None if fetch_one else []
 
 def fetch_zones():
-    try:
-        with open_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT ZoneID, Name FROM ZoneTbl")
-            return cursor.fetchall()
-    except Exception as e:
-        print(f"Error fetching zones: {e}")
-    return []
+    return execute_query("SELECT ZoneID, Name FROM ZoneTbl")
 
 def fetch_rooms(zone_id):
-    with open_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT ObjID, X, Y, Name FROM ObjectTbl WHERE ZoneID = ?", (zone_id,))
-        rooms = cursor.fetchall()
-    return rooms
+    return execute_query("SELECT ObjID, X, Y, Name FROM ObjectTbl WHERE ZoneID = ?", (zone_id,))
 
 def fetch_exits(from_obj_ids):
-    with open_db_connection() as conn:
-        cursor = conn.cursor()
-        placeholders = ','.join('?' for _ in from_obj_ids)
-        cursor.execute(f"SELECT FromID, ToID FROM ExitTbl WHERE FromID IN ({placeholders})", from_obj_ids)
-        exits = cursor.fetchall()
-    return exits
+    placeholders = ','.join('?' for _ in from_obj_ids)
+    return execute_query(f"SELECT FromID, ToID FROM ExitTbl WHERE FromID IN ({placeholders})", from_obj_ids)
 
 def fetch_zone_bounds(zone_id):
-    with open_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT MinX, MinY, MaxX, MaxY FROM ZoneTbl WHERE ZoneID = ?", (zone_id,))
-        return cursor.fetchone()
+    return execute_query("SELECT MinX, MinY, MaxX, MaxY FROM ZoneTbl WHERE ZoneID = ?", (zone_id,), fetch_one=True)
 
 def fetch_room_name(room_id):
-    try:
-        if room_id in room_name_cache:
-            return room_name_cache[room_id]
+    if room_id not in ROOM_NAME_CACHE:
+        ROOM_NAME_CACHE[room_id] = execute_query("SELECT Name FROM ObjectTbl WHERE ObjID = ?", (room_id,), fetch_one=True)[0]
+    return ROOM_NAME_CACHE.get(room_id)
 
-        with open_db_connection() as conn:
-            cursor = conn.cursor()
-            cursor.execute("SELECT Name FROM ObjectTbl WHERE ObjID = ?", (room_id,))
-            row = cursor.fetchone()
-            if row:
-                room_name_cache[room_id] = row[0]
-                return row[0]
-    except pyodbc.Error as e:
-        print(f"Database error while fetching room name: {e}")
-    except Exception as e:
-        print(f"Unexpected error while fetching room name: {e}")
-    return None
 def fetch_room_descriptions():
-    global room_description_cache
-    if room_description_cache:
-        return room_description_cache
-
-    with open_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT ObjID, Desc FROM ObjectTbl")
-        for row in cursor.fetchall():
-            room_description_cache[row[0]] = row[1]
-    return room_description_cache
+    if not ROOM_DESCRIPTION_CACHE:
+        for obj_id, desc in execute_query("SELECT ObjID, Desc FROM ObjectTbl"):
+            ROOM_DESCRIPTION_CACHE[obj_id] = desc
+    return ROOM_DESCRIPTION_CACHE
 
 def fetch_room_zone_id(room_id):
-    with open_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT ZoneID FROM ObjectTbl WHERE ObjID = ?", (room_id,))
-        result = cursor.fetchone()
-        if result:
-            return result[0]
-    return None
+    return execute_query("SELECT ZoneID FROM ObjectTbl WHERE ObjID = ?", (room_id,), fetch_one=True)[0]
 
 def fetch_room_position(room_id):
-    with open_db_connection() as conn:
-        cursor = conn.cursor()
-        cursor.execute("SELECT X, Y FROM ObjectTbl WHERE ObjID = ?", (room_id,))
-        result = cursor.fetchone()
-        if result:
-            return result[0], result[1]
-    return None, None
+    return execute_query("SELECT X, Y FROM ObjectTbl WHERE ObjID = ?", (room_id,), fetch_one=True)
 
 def fetch_connected_rooms(current_room_id):
-    connected_room_descriptions = {}
-
-    with open_db_connection() as conn:
-        cursor = conn.cursor()
-
-        cursor.execute("""
-            SELECT ToID
-            FROM ExitTbl
-            WHERE FromID = ?
-        """, (current_room_id,))
-        connected_room_ids = [row.ToID for row in cursor.fetchall()]
-
-        if not connected_room_ids:
-            return connected_room_descriptions
-
-        placeholders = ', '.join('?' for _ in connected_room_ids)
-        query = f"""
-            SELECT ObjID, Desc
-            FROM ObjectTbl
-            WHERE ObjID IN ({placeholders})
-        """
-        cursor.execute(query, connected_room_ids)
-        for row in cursor.fetchall():
-            connected_room_descriptions[row.ObjID] = row.Desc.strip().replace('\r\n', ' ').replace('\n', ' ')
-
-    return connected_room_descriptions
-
+    connected_room_ids = [row.ToID for row in execute_query("SELECT ToID FROM ExitTbl WHERE FromID = ?", (current_room_id,))]
+    placeholders = ', '.join('?' for _ in connected_room_ids)
+    query = f"SELECT ObjID, Desc FROM ObjectTbl WHERE ObjID IN ({placeholders})"
+    return {obj_id: desc.strip().replace('\r\n', ' ').replace('\n', ' ') for obj_id, desc in execute_query(query, connected_room_ids)}
 
 
 access_driver = (find_access_driver())
@@ -150,5 +80,3 @@ if access_driver is None:
     print("Microsoft Access Driver not found.")
     print("Please download and install the 64-bit Microsoft Access Database Engine 2016 Redistributable.")
     webbrowser.open("https://www.microsoft.com/en-us/download/details.aspx?id=54920")
-else:
-    conn_str = f'DRIVER={{{access_driver}}};DBQ={db_file}'
