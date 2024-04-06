@@ -72,9 +72,15 @@ def fetch_zones():
 def fetch_rooms(zone_id):
     return execute_query("SELECT ObjID, X, Y, Name FROM ObjectTbl WHERE ZoneID = ?", (zone_id,))
 
-def fetch_exits(from_obj_ids):
+def fetch_exits_with_zone_info(from_obj_ids):
     placeholders = ','.join('?' for _ in from_obj_ids)
-    return execute_query(f"SELECT FromID, ToID FROM ExitTbl WHERE FromID IN ({placeholders})", from_obj_ids)
+    query = f"""
+    SELECT e.FromID, e.ToID, o.ZoneID
+    FROM ExitTbl e
+    JOIN ObjectTbl o ON e.ToID = o.ObjID
+    WHERE e.FromID IN ({placeholders})
+    """
+    return execute_query(query, from_obj_ids)
 
 def fetch_zone_bounds(zone_id):
     return execute_query("SELECT MinX, MinY, MaxX, MaxY FROM ZoneTbl WHERE ZoneID = ?", (zone_id,), fetch_one=True)

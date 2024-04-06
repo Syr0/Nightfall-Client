@@ -4,15 +4,28 @@ import tkinter as tk
 import configparser
 
 from tkinter import ttk
-from core.database import fetch_rooms, fetch_zones, fetch_exits, fetch_room_name, fetch_room_position
+from core.database import fetch_rooms, fetch_zones, fetch_exits_with_zone_info, fetch_room_name, fetch_room_position, \
+    fetch_zone_name
 
 from gui.tooltip import ToolTip
 
+
+def calculate_direction(from_pos, to_pos):
+    dir_x = to_pos[0] - from_pos[0]
+    dir_y = to_pos[1] - from_pos[1]
+    mag = (dir_x**2 + dir_y**2) ** 0.5
+    if mag == 0:
+        return 0, 0
+    return dir_x / mag, dir_y / mag
+
+
 class MapViewer:
     def __init__(self, parent, pane, root):
+        self.current_room_id = None
         self.parent = parent
         self.pane = pane
         self.root = root
+        self.displayed_zone_id = None
         self.load_config()
 
         self.this = tk.Canvas(self.parent, bg=self.background_color)
@@ -52,6 +65,7 @@ class MapViewer:
         self.room_color = config['Visuals']['RoomColor']
         self.directed_graph = config.getboolean('Visuals', 'DirectedGraph')
         self.default_zone = config['General']['DefaultZone']
+        self.note_color = config['Visuals'].get('ZoneLeavingColor', '#FFA500')
 
     def setup_bindings(self):
         self.this.bind("<MouseWheel>", self.on_mousewheel)
@@ -68,10 +82,23 @@ class MapViewer:
             self.display_zone(default_zone_id)
 
     def display_zone(self, zone_id):
-        rooms = fetch_rooms(zone_id)
-        exits = fetch_exits([room[0] for room in rooms])
-        self.draw_map(rooms, exits)
         self.displayed_zone_id = zone_id
+        rooms = fetch_rooms(zone_id)
+        exits_info = self.exits_with_zone_info([room[0] for room in rooms])
+        self.draw_map(rooms, exits_info)
+
+    def exits_with_zone_info(self, from_obj_ids):
+        exits_info = fetch_exits_with_zone_info(from_obj_ids)
+        detailed_exits_info = []
+        for from_id, to_id, to_zone_id in exits_info:
+            from_pos = fetch_room_position(from_id)
+            to_pos = fetch_room_position(to_id)
+            if from_pos and to_pos:
+                dir_x, dir_y = calculate_direction(from_pos, to_pos)
+                detailed_exits_info.append((from_id, to_id, to_zone_id, dir_x, dir_y))
+            else:
+                print(f"Position not found for from_id: {from_id} or to_id: {to_id}")
+        return detailed_exits_info
 
     def create_rounded_rectangle(self, x1, y1, x2, y2, radius=25, **kwargs):
         return self.this.create_polygon([x1+radius, y1, x2-radius, y1, x2, y1, x2, y1+radius, x2, y2-radius, x2, y2, x2-radius, y2, x1+radius, y2, x1, y2, x1, y2-radius, x1, y1+radius, x1, y1], **kwargs, smooth=True)
@@ -88,7 +115,7 @@ class MapViewer:
         room_tag = f"{tag_id}_room"
         self.create_rounded_rectangle(x - box_size, y - box_size, x + box_size, y + box_size, radius=10,
                                       fill=self.room_color, tags=(room_tag,))
-        self.this.tag_bind(room_tag, "<Enter>", lambda e, id=room_id: self.show_room_name(e, id))
+        self.this.tag_bind(room_tag, "<Enter>", lambda e, id=room_id: self.show_room_name(e, id, e.x, e.y))
         self.this.tag_bind(room_tag, "<Leave>", self.hide_room_name)
 
     def draw_exits(self, rooms, exits):
@@ -107,14 +134,16 @@ class MapViewer:
                     self.this.create_line(from_pos[0], from_pos[1], to_pos[0], to_pos[1], fill=self.room_color)
                 else:
                     self.this.create_line(from_pos[0], from_pos[1], to_pos[0], to_pos[1], arrow=tk.LAST,fill=self.room_color)
+    def draw_exit_with_note(self, from_x, from_y, dir_x, dir_y, note):
+        end_x, end_y = from_x + dir_x * 100, from_y + dir_y * 100
+        self.this.create_line(from_x, from_y, end_x, end_y, fill=self.note_color, arrow=tk.LAST)
+        self.this.create_text(end_x, end_y, text=note, fill=self.note_color, anchor="w")
 
-    def draw_map(self, rooms, exits):
+    def draw_map(self, rooms, exits_info):
         total_x, total_y, count = 0, 0, 0
-        count = 0
         room_size = 20
         shadow_offset = 6
         extra_padding = 10
-
         offset = room_size + shadow_offset + extra_padding
         min_x, min_y, max_x, max_y = float('inf'), float('inf'), float('-inf'), float('-inf')
 
@@ -127,18 +156,23 @@ class MapViewer:
             count += 1
 
         if count > 0:
-            self.center_of_mass = (total_x / count, total_y / count)
-
-        center_x, center_y = self.center_of_mass
-        self.this.create_oval(center_x - 20, center_y - 20, center_x + 20, center_y + 20, fill="yellow",
-                              outline="yellow",
-                              tags="center_of_mass")
+            center_x, center_y = total_x / count, total_y / count
+            self.this.create_oval(center_x - 20, center_y - 20, center_x + 20, center_y + 20, fill="yellow",
+                                  outline="yellow", tags="center_of_mass")
         self.drawn_bounds = (min_x, min_y, max_x, max_y)
-        self.draw_exits(rooms, exits)
+        self.draw_exits(rooms, [exit[:2] for exit in exits_info])
 
-    def set_player_position(self, room_id):
-        room_tag = f"{room_id}_room"
-        self.this.itemconfig(room_tag, outline=self.player_marker_color)
+        for exit_info in exits_info:
+            from_id, to_id, to_zone_id, _, _ = exit_info
+            if to_zone_id != self.displayed_zone_id:
+                to_zone_name = fetch_zone_name(to_zone_id)
+                from_room_position = fetch_room_position(from_id)
+                if from_room_position:
+                    x, y = from_room_position
+                    self.place_zone_change_note(x, y, to_zone_name)
+    def place_zone_change_note(self, x, y, zone_name):
+        note_text = f"To {zone_name}"
+        self.this.create_text(x, y - 20, text=note_text, fill=self.note_color, font=('Helvetica', '10', 'bold'))
 
     def on_mousewheel(self, event):
         scale = 1.0
@@ -159,16 +193,16 @@ class MapViewer:
     def adjust_scrollregion(self):
         self.this.configure(scrollregion=self.this.bbox(tk.ALL))
 
-    def show_room_name(self, event, room_id):
+    def show_room_name(self, event, room_id, event_x, event_y):
         room_name = fetch_room_name(room_id)
         if room_id not in self.tooltips:
             self.tooltips[room_id] = ToolTip(self.this)
-        self.tooltips[room_id].show_tip(room_name)
-        self.this.bind("<Motion>", lambda e: self.update_tooltip_position(e, room_id))
+        self.tooltips[room_id].show_tip(room_name, event_x, event_y)
+        self.this.bind("<Motion>", lambda e: self.update_tooltip_position(e, room_id, e.x, e.y))
 
-    def update_tooltip_position(self, event, room_id):
+    def update_tooltip_position(self, event, room_id, event_x, event_y):
         if room_id in self.tooltips:
-            self.tooltips[room_id].show_tip(fetch_room_name(room_id))
+            self.tooltips[room_id].show_tip(fetch_room_name(room_id), event_x, event_y)
 
     def hide_room_name(self, event):
         for tooltip in self.tooltips.values():
@@ -181,32 +215,18 @@ class MapViewer:
         self.current_room_id = room_id
         self.map_viewer.highlight_room(room_id)
 
+    def on_zone_select(self, event):
+        selection = self.zone_listbox.curselection()
+        if selection:
+            index = self.zone_listbox.curselection()[0]
+            zone_name = self.zone_listbox.get(index)
+            zone_id = self.zone_dict[zone_name]
+            self.display_zone(zone_id)
+            rooms = fetch_rooms(zone_id)
+            exits_info = self.exits_with_zone_info([room[0] for room in rooms])
 
-    def on_zone_select(self,event):
-        if not self.zone_listbox.curselection():
-            return
-        index = self.zone_listbox.curselection()[0]
-        zone_name = self.zone_listbox.get(index)
-        zone_id = self.zone_dict[zone_name]
-        rooms = fetch_rooms(zone_id)
-        exits = fetch_exits([room[0] for room in rooms])
-
-        if not rooms:
-            print("No rooms found for this zone.")
-            return
-
-        self.this.delete("all")
-        self.draw_map(rooms, exits)
-
-    def show_room_name(self, event, room_id):
-        room_name = fetch_room_name(room_id)
-        if room_id not in self.tooltips:
-            self.tooltips[room_id] = ToolTip(self.this)
-        self.tooltips[room_id].show_tip(room_name, event.x, event.y)
-
-    def hide_room_name(self, event):
-        for tooltip in self.tooltips.values():
-            tooltip.hide_tip()
+            self.this.delete("all")
+            self.draw_map(rooms, exits_info)
 
     def select_default_zone(self,zone_listbox):
         try:
@@ -227,3 +247,8 @@ class MapViewer:
 
         room_tag = f"{room_id}_room"
         self.this.itemconfig(room_tag, fill="#FF6EC7")
+
+    def draw_zone_change_note(self, x, y, zone_name):
+        note_text = f"To {zone_name}"
+        self.this.create_text(x, y - 30, text=note_text, fill="blue", font=('Helvetica', '10', 'bold'))
+
