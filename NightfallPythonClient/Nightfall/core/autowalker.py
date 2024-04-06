@@ -18,6 +18,7 @@ class AutoWalker:
         return self.active
 
     def set_current_room(self, room_id):
+        print(f"Setting current room: {room_id}")
         if self.current_room_id is not None:
             self.map_viewer.unhighlight_room(self.current_room_id)
         self.current_room_id = room_id
@@ -25,9 +26,8 @@ class AutoWalker:
 
     def toggle_active(self):
         self.active = not self.active
-        if self.active:
-            if self.current_room_id is None:
-                self.analyze_response(None)
+        if self.active and self.current_room_id is None:
+            self.analyze_response(None)
 
     def analyze_response(self, response):
         if not self.active:
@@ -37,7 +37,8 @@ class AutoWalker:
     def _process_response(self, response):
         if not self.active or response is None:
             return
-        description = " ".join(response.split()[1:7])
+        description = " ".join(response.split())
+        print(f"Received response description: {description}")  # Debug output
         words_in_response = set(description.split())
 
         room_descriptions = fetch_connected_rooms(
@@ -47,19 +48,19 @@ class AutoWalker:
         if best_match:
             room_zone_id = fetch_room_zone_id(best_match)
             room_x, room_y = fetch_room_position(best_match)
-            if room_zone_id != self.map_viewer.displayed_zone_id:
+            print(f"Best match found: Room ID {best_match}, Zone ID {room_zone_id}, Position ({room_x}, {room_y})")  # Debug output
+            self.map_viewer.root.after(0, lambda: self.set_current_room(best_match))
+            if room_zone_id != getattr(self.map_viewer, 'displayed_zone_id', None):
                 self.map_viewer.root.after(0, lambda: self.map_viewer.display_zone(room_zone_id))
             if room_x is not None and room_y is not None:
                 self.map_viewer.root.after(0, lambda: self.map_viewer.focus_point(room_x, room_y))
-            self.map_viewer.root.after(0, lambda: self.set_current_room(best_match))
 
     def _find_matching_room(self, words_in_response, room_descriptions):
         best_match = None
         max_common_words = 0
 
         for room_id, description in room_descriptions.items():
-            if description is None:
-                continue
+            description = description or ""
             room_name = fetch_room_name(room_id) or ""
             combined_text = description + " " + room_name
             words_in_description = set(combined_text.split())
@@ -69,7 +70,6 @@ class AutoWalker:
                 best_match = room_id
 
         if best_match is None:
-            print("Couldn't find any room with description")
+            print("Couldn't find any room with description matching the response.")
 
         return best_match
-

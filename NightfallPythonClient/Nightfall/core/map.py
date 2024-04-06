@@ -96,22 +96,21 @@ class MapViewer:
 
     def draw_exits(self, rooms, exits):
         bidirectional = set()
-        exits_tuples = {(exit.FromID, exit.ToID) for exit in exits}
+        exits_tuples = {(exit[0], exit[1]) for exit in exits}
 
-        for exit in exits_tuples:
-            from_id, to_id = exit
+        for from_id, to_id in exits_tuples:
             if (to_id, from_id) in exits_tuples:
-                bidirectional.add(exit)
+                bidirectional.add((from_id, to_id))
 
-        for exit in exits_tuples:
-            from_id, to_id = exit
+        for from_id, to_id in exits_tuples:
             from_pos = next((room[1:3] for room in rooms if room[0] == from_id), None)
             to_pos = next((room[1:3] for room in rooms if room[0] == to_id), None)
             if from_pos and to_pos:
-                if exit in bidirectional:
+                if (from_id, to_id) in bidirectional:
                     self.this.create_line(from_pos[0], from_pos[1], to_pos[0], to_pos[1], fill=self.room_color)
                 else:
-                    self.this.create_line(from_pos[0], from_pos[1], to_pos[0], to_pos[1], arrow=tk.LAST, fill=self.room_color)
+                    self.this.create_line(from_pos[0], from_pos[1], to_pos[0], to_pos[1], arrow=tk.LAST,
+                                          fill=self.room_color)
 
     def draw_map(self, rooms, exits):
         total_x, total_y, count = 0, 0, 0
