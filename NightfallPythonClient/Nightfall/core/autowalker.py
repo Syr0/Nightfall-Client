@@ -60,8 +60,6 @@ class AutoWalker:
                 self.map_viewer.root.after(0, lambda: self.set_current_room(best_match))
                 if room_zone_id != getattr(self.map_viewer, 'displayed_zone_id', None):
                     self.map_viewer.root.after(0, lambda: self.map_viewer.display_zone(room_zone_id))
-                if room_x is not None and room_y is not None:
-                    self.map_viewer.root.after(0, lambda: self.map_viewer.focus_point(room_x, room_y))
             else:
                 print("Player is looking around in the current room.")
 

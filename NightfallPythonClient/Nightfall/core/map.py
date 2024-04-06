@@ -184,42 +184,7 @@ class MapViewer:
             self.map_viewer.unhighlight_room(self.current_room_id)
         self.current_room_id = room_id
         self.map_viewer.highlight_room(room_id)
-        room_position = fetch_room_position(room_id)
-        if room_position:
-            self.map_viewer.root.after(0, lambda: self.map_viewer.focus_point(*room_position))
 
-    def focus_point(self,x, y):
-        self.this.update_idletasks()
-        this_width = self.this.winfo_width()
-        this_height = self.this.winfo_height()
-
-        scrollregion = self.this.bbox("all")
-        if scrollregion is None:
-            print("No scroll region set.")
-            return
-
-        scrollregion_width = scrollregion[2] - scrollregion[0]
-        scrollregion_height = scrollregion[3] - scrollregion[1]
-
-        center_fraction_x = (x - scrollregion[0]) / scrollregion_width
-        center_fraction_y = (y - scrollregion[1]) / scrollregion_height
-
-        half_view_fraction_x = this_width / (2 * scrollregion_width)
-        half_view_fraction_y = this_height / (2 * scrollregion_height)
-
-        final_scroll_x = center_fraction_x - half_view_fraction_x
-        final_scroll_y = center_fraction_y - half_view_fraction_y
-        final_scroll_x = max(0, min(final_scroll_x, 1))
-        final_scroll_y = max(0, min(final_scroll_y, 1))
-
-        self.this.xview_moveto(final_scroll_x)
-        self.this.yview_moveto(final_scroll_y)
-
-    def center_and_zoom_out_map(self):
-        if not self.drawn_bounds:
-            return
-        x, y = self.center_of_mass
-        self.focus_point(x, y)
 
     def on_zone_select(self,event):
         if not self.zone_listbox.curselection():
@@ -236,7 +201,6 @@ class MapViewer:
 
         self.this.delete("all")
         self.draw_map(rooms, exits)
-        self.center_and_zoom_out_map()
 
     def show_room_name(self, event, room_id):
         room_name = fetch_room_name(room_id)
