@@ -9,22 +9,27 @@ from core.autowalker import AutoWalker
 class MainWindow:
     def __init__(self, root):
         self.root = root
-        self.initialize_window()
         self.update_buffer = []
         self.update_pending = False
-        self.config = load_config()
-        self.setup_ui()
-        self.load_trigger_commands()
-        self.setup_bindings()
-        self.connection = MUDConnection(self.handle_message, self.on_login_success)
-        self.connection.connect()
-        self.auto_walker = AutoWalker(self.map_viewer)
-        self.setup_toolbar()
-        self.update_position_active = False
-        self.awaiting_response_for_command = False
         self.command_history = []
         self.command_history_index = -1
+        self.awaiting_response_for_command = False
+        self.ansi_colors = {}
 
+        self.config = load_config()
+        self.load_ansi_colors()
+
+        self.command_color = self.config.get('ANSIColors', 'OwnCommandsColor', fallback='#FFA500')
+
+        self.initialize_window()
+        self.load_trigger_commands()
+        self.setup_bindings()
+        self.setup_ui()
+        self.setup_toolbar()
+
+        self.auto_walker = AutoWalker(self.map_viewer)
+        self.connection = MUDConnection(self.handle_message, self.on_login_success)
+        self.connection.connect()
     def initialize_window(self):
         self.root.title("MUD Client with Map")
         self.root.geometry("1200x600")
@@ -63,15 +68,16 @@ class MainWindow:
             self.connection.send(command.strip())
 
     def load_ansi_colors(self):
-        colors = {}
+        self.ansi_colors = {}
         if self.config.has_section('ANSIColors'):
-            for code in self.config['ANSIColors']:
-                colors[code] = self.config.get('ANSIColors', code)
-        return colors
-
+            for code, color in self.config['ANSIColors'].items():
+                self.ansi_colors[code] = color
+        print("Loaded ANSI colors:", self.ansi_colors)
     def create_color_tags(self):
+        print("Creating color tags with:", self.ansi_colors)
         for code, color in self.ansi_colors.items():
             self.text_area.tag_configure(code, foreground=color)
+        self.text_area.tag_configure('command', foreground=self.command_color)
 
     def send_input(self, event):
         input_text = self.input_area.get().strip()
@@ -79,8 +85,9 @@ class MainWindow:
             if any(cmd for cmd in self.trigger_commands if cmd.startswith(input_text.split()[0])):
                 self.awaiting_response_for_command = True
             self.connection.send(input_text)
+
             self.text_area.config(state='normal')
-            self.text_area.insert(tk.END, f"> {input_text}\n")
+            self.text_area.insert(tk.END, f"> {input_text}\n", 'command')
             self.text_area.config(state='disabled')
             self.text_area.see(tk.END)
             self.command_history.append(input_text)
@@ -88,7 +95,6 @@ class MainWindow:
         self.input_area.delete(0, tk.END)
 
     def ANSI_Color_Text(self, message):
-        self.ansi_colors = self.load_ansi_colors()
         current_color = None
         buffer = ""
         i = 0
@@ -151,7 +157,6 @@ class MainWindow:
         font_color = self.config.get('Font', 'color')
         self.text_area = tk.Text(console_frame, wrap=tk.WORD, state='disabled', bg=bg_color, fg=font_color)
         self.text_area.pack(fill=tk.BOTH, expand=True, side=tk.TOP)
-        self.ansi_colors = self.load_ansi_colors()
         self.create_color_tags()
         self.input_area = tk.Entry(console_frame)
         self.input_area.pack(fill=tk.X, side=tk.BOTTOM)
