@@ -1,9 +1,9 @@
-2024-04-06 17:39:00,993 - INFO - Starting to load Access DB into memory.
-2024-04-06 17:39:01,182 - INFO - Loading table: DirTbl
-2024-04-06 17:39:01,183 - INFO - Loading table: ExitKindTbl
-2024-04-06 17:39:01,184 - INFO - Loading table: ExitTbl
-2024-04-06 17:39:01,556 - INFO - Loading table: NoteTbl
-2024-04-06 17:39:01,560 - INFO - Loading table: ObjectTbl
-2024-04-06 17:39:01,778 - INFO - Loading table: PortalTbl
-2024-04-06 17:39:01,781 - INFO - Loading table: ZoneTbl
-2024-04-06 17:39:01,784 - INFO - Access DB loaded into memory successfully.
+2024-04-06 17:55:12,507 - INFO - Starting to load Access DB into memory.
+2024-04-06 17:55:12,677 - INFO - Loading table: DirTbl
+2024-04-06 17:55:12,678 - INFO - Loading table: ExitKindTbl
+2024-04-06 17:55:12,678 - INFO - Loading table: ExitTbl
+2024-04-06 17:55:13,029 - INFO - Loading table: NoteTbl
+2024-04-06 17:55:13,032 - INFO - Loading table: ObjectTbl
+2024-04-06 17:55:13,239 - INFO - Loading table: PortalTbl
+2024-04-06 17:55:13,241 - INFO - Loading table: ZoneTbl
+2024-04-06 17:55:13,244 - INFO - Access DB loaded into memory successfully.

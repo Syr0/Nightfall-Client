@@ -4,7 +4,6 @@ from tkinter import ttk
 from network.connection import MUDConnection
 from config.settings import load_config
 from core.map import MapViewer
-from tkinter import PhotoImage
 from core.autowalker import AutoWalker
 
 class MainWindow:

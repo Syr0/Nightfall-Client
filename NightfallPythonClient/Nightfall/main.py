@@ -1,6 +1,10 @@
-#main.py
-import tkinter as tk
+# main.py
+import os
+os.chdir(os.path.dirname(os.path.abspath(__file__)))
+os.system("python install.py")
+
 from gui.mainwindow import MainWindow
+import tkinter as tk
 
 def main():
     root = tk.Tk()
