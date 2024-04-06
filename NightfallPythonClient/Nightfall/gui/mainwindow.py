@@ -72,9 +72,7 @@ class MainWindow:
         if self.config.has_section('ANSIColors'):
             for code, color in self.config['ANSIColors'].items():
                 self.ansi_colors[code] = color
-        print("Loaded ANSI colors:", self.ansi_colors)
     def create_color_tags(self):
-        print("Creating color tags with:", self.ansi_colors)
         for code, color in self.ansi_colors.items():
             self.text_area.tag_configure(code, foreground=color)
         self.text_area.tag_configure('command', foreground=self.command_color)
