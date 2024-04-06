@@ -3,11 +3,12 @@ import tkinter as tk
 from tkinter import ttk
 from network.connection import MUDConnection
 from config.settings import load_config
-from core.map import MapViewer
-from core.autowalker import AutoWalker
+from map.map import MapViewer
+from core.positionfinder import AutoWalker
 
 class MainWindow:
     def __init__(self, root):
+        self.update_position_active = None
         self.root = root
         self.update_buffer = []
         self.update_pending = False
@@ -31,12 +32,14 @@ class MainWindow:
         self.connection = MUDConnection(self.handle_message, self.on_login_success)
         self.connection.connect()
     def initialize_window(self):
-        self.root.title("MUD Client with Map")
+        self.root.title("MUD Client with map")
         self.root.geometry("1200x600")
 
     def load_trigger_commands(self):
-        commands_str = self.config.get('TriggerCommands', 'commands', fallback="l,look,n,w,s,e,north,west,east,south,up,down,u,d,enter,leave")
+        commands_str = self.config.get('TriggerCommands', 'commands',
+                                       fallback="l,look,n,w,s,e,north,west,east,south,up,down,u,d,enter,leave")
         self.trigger_commands = [cmd.strip() for cmd in commands_str.split(',')]
+        self.room_reload_command = self.config.get('TriggerCommands', 'RoomReload', fallback='look')
 
     def setup_ui(self):
         pane = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
@@ -182,6 +185,7 @@ class MainWindow:
         self.auto_walker.toggle_active()
         if self.auto_walker.is_active():
             self.update_pos_toggle_btn.config(bg="green")
+            self.connection.send(self.room_reload_command)
         else:
             self.update_pos_toggle_btn.config(bg="lightgrey")
 

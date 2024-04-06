@@ -1,12 +1,8 @@
-# autowalker.py
+# positionfinder.py
 import threading
 from core.database import fetch_zone_name,fetch_room_descriptions, fetch_connected_rooms, fetch_room_zone_id, fetch_room_position, \
     fetch_room_name
 import Levenshtein
-
-#Task
-#"If toogled on, ensure that every time a response comes from the game server, the strings inside are compared with all the descriptions of rooms connected to the current location (need to be specified, too). if it matches, set that new room to the current player position (and hightlight it).
-# unhighlight the last room. If there is no current room specified or the toggle was just now activated(and there was no movement since that), then search all the database for descriptions close to the current received one. Select the roomID of the best match. ensure not to compary linefeeds and carrieg returns"
 
 class AutoWalker:
     def __init__(self, map_viewer):
