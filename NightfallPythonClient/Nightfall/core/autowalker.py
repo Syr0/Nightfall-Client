@@ -1,8 +1,8 @@
 # autowalker.py
 import threading
-from core.database import fetch_room_descriptions, fetch_connected_rooms, fetch_room_zone_id, fetch_room_position, \
+from core.database import fetch_zone_name,fetch_room_descriptions, fetch_connected_rooms, fetch_room_zone_id, fetch_room_position, \
     fetch_room_name
-
+import Levenshtein
 
 #Task
 #"If toogled on, ensure that every time a response comes from the game server, the strings inside are compared with all the descriptions of rooms connected to the current location (need to be specified, too). if it matches, set that new room to the current player position (and hightlight it).
@@ -38,26 +38,37 @@ class AutoWalker:
         if not self.active or response is None:
             return
         description = " ".join(response.split())
-        print(f"Received response description: {description}")  # Debug output
+        print(f"Received response description: {description}")
         words_in_response = set(description.split())
 
         room_descriptions = fetch_connected_rooms(
             self.current_room_id) if self.current_room_id else fetch_room_descriptions()
 
+        if self.current_room_id:
+            current_room_description = fetch_room_descriptions().get(self.current_room_id, "")
+            room_descriptions[self.current_room_id] = current_room_description
+
         best_match = self._find_matching_room(words_in_response, room_descriptions)
         if best_match:
             room_zone_id = fetch_room_zone_id(best_match)
+            zone_name = fetch_zone_name(room_zone_id)
             room_x, room_y = fetch_room_position(best_match)
-            print(f"Best match found: Room ID {best_match}, Zone ID {room_zone_id}, Position ({room_x}, {room_y})")  # Debug output
-            self.map_viewer.root.after(0, lambda: self.set_current_room(best_match))
-            if room_zone_id != getattr(self.map_viewer, 'displayed_zone_id', None):
-                self.map_viewer.root.after(0, lambda: self.map_viewer.display_zone(room_zone_id))
-            if room_x is not None and room_y is not None:
-                self.map_viewer.root.after(0, lambda: self.map_viewer.focus_point(room_x, room_y))
+            print(
+                f"Best match found: Room ID {best_match}, Zone ID {room_zone_id}, Position ({room_x}, {room_y})")  # Debug output
+
+            if best_match != self.current_room_id:
+                self.map_viewer.root.after(0, lambda: self.set_current_room(best_match))
+                if room_zone_id != getattr(self.map_viewer, 'displayed_zone_id', None):
+                    self.map_viewer.root.after(0, lambda: self.map_viewer.display_zone(room_zone_id))
+                if room_x is not None and room_y is not None:
+                    self.map_viewer.root.after(0, lambda: self.map_viewer.focus_point(room_x, room_y))
+            else:
+                print("Player is looking around in the current room.")
 
     def _find_matching_room(self, words_in_response, room_descriptions):
         best_match = None
         max_common_words = 0
+        possible_matches = []
 
         for room_id, description in room_descriptions.items():
             description = description or ""
@@ -65,11 +76,62 @@ class AutoWalker:
             combined_text = description + " " + room_name
             words_in_description = set(combined_text.split())
             common_words = words_in_response.intersection(words_in_description)
-            if len(common_words) > max_common_words:
-                max_common_words = len(common_words)
-                best_match = room_id
+            common_word_count = len(common_words)
 
-        if best_match is None:
-            print("Couldn't find any room with description matching the response.")
+            if common_word_count > max_common_words:
+                max_common_words = common_word_count
+                possible_matches = [(room_id, combined_text)]
+            elif common_word_count == max_common_words and common_word_count > 0:
+                possible_matches.append((room_id, combined_text))
+
+        if len(possible_matches) > 1:
+            best_match = self._perform_full_text_comparison(words_in_response, possible_matches)
+        elif possible_matches:
+            best_match = possible_matches[0][0]
+
+        if not best_match:
+            print(
+                "Couldn't find any room with a description matching the response. Please rework the room descriptions.")
 
         return best_match
+
+    def _perform_full_text_comparison(self, words_in_response, possible_matches):
+        response_text = " ".join(words_in_response).lower()
+        highest_similarity = -1
+        best_match = None
+
+        for room_id, text in possible_matches:
+            prepared_text = text.lower()
+            similarity = Levenshtein.ratio(prepared_text, response_text)
+
+            if similarity > highest_similarity:
+                highest_similarity = similarity
+                best_match = room_id
+
+        return best_match
+
+    def _calculate_levenshtein_distance(self, s1, s2):
+        if len(s1) < len(s2):
+            return self._calculate_levenshtein_distance(s2, s1)
+
+        if len(s2) == 0:
+            return len(s1)
+
+        previous_row = range(len(s2) + 1)
+        for i, c1 in enumerate(s1):
+            current_row = [i + 1]
+            for j, c2 in enumerate(s2):
+                insertions = previous_row[j + 1] + 1
+                deletions = current_row[j] + 1
+                substitutions = previous_row[j] + (c1 != c2)
+                current_row.append(min(insertions, deletions, substitutions))
+            previous_row = current_row
+
+        return previous_row[-1]
+
+    def _calculate_text_similarity(self, text1, text2):
+        distance = self._calculate_levenshtein_distance(text1, text2)
+        longest_text_length = max(len(text1), len(text2))
+        if longest_text_length == 0:
+            return 1.0
+        return 1 - distance / longest_text_length

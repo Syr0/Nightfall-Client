@@ -118,6 +118,10 @@ def fetch_connected_rooms(current_room_id):
     results = execute_query(query, connected_room_ids)
     return {result[0]: result[1].strip().replace('\r\n', ' ').replace('\n', ' ') for result in results}
 
+def fetch_zone_name(zone_id):
+    query = "SELECT Name FROM ZoneTbl WHERE ZoneID = ?"
+    result = execute_query(query, (zone_id,), fetch_one=True)
+    return result[0] if result else "Unknown Zone"
 
 load_access_db_to_memory()
 
