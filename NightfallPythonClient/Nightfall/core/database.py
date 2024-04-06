@@ -14,8 +14,7 @@ import pyodbc
 #PortalTbl contains all portals, ways that can be entered from anywhere and cannot be drawn as such.
 #ZoneTbl contains the Zones of the map. ZoneID references it Name is the caption. MinX MinY MaxX and MaxY show the total size of the zone. Dx and Dy the position and XOffset and YOffset how much they need to be movr to match upper and lower layers.X and Y seems to be the latest view center
 
-logging.basicConfig(level=logging.INFO, filename="database_logs.log", filemode='w',
-                    format='%(asctime)s - %(levelname)s - %(message)s')
+#logging.basicConfig(level=logging.INFO, filename="database_logs.log", filemode='w',format='%(asctime)s - %(levelname)s - %(message)s')
 
 DB_FILE = r"..\..\Map.mdb"
 MEMORY_CONN = None
