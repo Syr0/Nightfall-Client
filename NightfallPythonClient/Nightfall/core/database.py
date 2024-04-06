@@ -59,7 +59,6 @@ def load_access_db_to_memory():
 def find_access_driver():
     return next((driver for driver in pyodbc.drivers() if 'ACCESS' in driver.upper()), None)
 
-
 def execute_query(query, params=(), fetch_one=False):
     """Executes a query on the in-memory SQLite database."""
     with DB_LOCK, MEMORY_CONN:
@@ -67,26 +66,22 @@ def execute_query(query, params=(), fetch_one=False):
         cursor.execute(query, params)
         return cursor.fetchone() if fetch_one else cursor.fetchall()
 
-
 def fetch_zones():
     return execute_query("SELECT ZoneID, Name FROM ZoneTbl")
 
-
 def fetch_rooms(zone_id):
     return execute_query("SELECT ObjID, X, Y, Name FROM ObjectTbl WHERE ZoneID = ?", (zone_id,))
-
 
 def fetch_exits(from_obj_ids):
     placeholders = ','.join('?' for _ in from_obj_ids)
     return execute_query(f"SELECT FromID, ToID FROM ExitTbl WHERE FromID IN ({placeholders})", from_obj_ids)
 
-
 def fetch_zone_bounds(zone_id):
     return execute_query("SELECT MinX, MinY, MaxX, MaxY FROM ZoneTbl WHERE ZoneID = ?", (zone_id,), fetch_one=True)
 
-
 def fetch_room_name(room_id):
-    result = execute_query("SELECT Name FROM ObjectTbl WHERE ObjID = ?", (room_id,), fetch_one=True)
+    room_id_int = int(room_id)
+    result = execute_query("SELECT Name FROM ObjectTbl WHERE ObjID = ?", (room_id_int,), fetch_one=True)
     if result:
         ROOM_NAME_CACHE[room_id] = result[0]
         return result[0]
@@ -94,13 +89,11 @@ def fetch_room_name(room_id):
         logging.info(f"No name found for RoomID: {room_id}")
         return "Unknown Room"
 
-
 def fetch_room_descriptions():
     if not ROOM_DESCRIPTION_CACHE:
         for obj_id, desc in execute_query("SELECT ObjID, Desc FROM ObjectTbl"):
             ROOM_DESCRIPTION_CACHE[obj_id] = desc
     return ROOM_DESCRIPTION_CACHE
-
 
 def fetch_zone_info():
     query = "SELECT ZoneID, Name, MinX, MinY, MaxX, MaxY FROM ZoneTbl"
