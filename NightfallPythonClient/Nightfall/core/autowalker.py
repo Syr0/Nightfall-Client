@@ -126,10 +126,3 @@ class AutoWalker:
             previous_row = current_row
 
         return previous_row[-1]
-
-    def _calculate_text_similarity(self, text1, text2):
-        distance = self._calculate_levenshtein_distance(text1, text2)
-        longest_text_length = max(len(text1), len(text2))
-        if longest_text_length == 0:
-            return 1.0
-        return 1 - distance / longest_text_length

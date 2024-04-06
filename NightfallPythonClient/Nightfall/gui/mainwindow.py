@@ -22,6 +22,8 @@ class MainWindow:
         self.setup_toolbar()
         self.update_position_active = False
         self.awaiting_response_for_command = False
+        self.command_history = []
+        self.command_history_index = -1
 
     def initialize_window(self):
         self.root.title("MUD Client with Map")
@@ -72,12 +74,17 @@ class MainWindow:
             self.text_area.tag_configure(code, foreground=color)
 
     def send_input(self, event):
-        input_text = self.input_area.get().split()
+        input_text = self.input_area.get().strip()
         if input_text:
-            input_text = input_text[0]
-            if input_text in self.trigger_commands:
+            if any(cmd for cmd in self.trigger_commands if cmd.startswith(input_text.split()[0])):
                 self.awaiting_response_for_command = True
-            self.connection.send(self.input_area.get())
+            self.connection.send(input_text)
+            self.text_area.config(state='normal')
+            self.text_area.insert(tk.END, f"> {input_text}\n")
+            self.text_area.config(state='disabled')
+            self.text_area.see(tk.END)
+            self.command_history.append(input_text)
+            self.command_history_index = -1
         self.input_area.delete(0, tk.END)
 
     def ANSI_Color_Text(self, message):
@@ -151,18 +158,19 @@ class MainWindow:
         self.input_area.bind("<Return>", self.send_input)
         self.text_area.bind("<1>", lambda event: self.input_area.focus())
         self.text_area.bind("<Control-c>", self.copy_text)
+        self.input_area.bind("<Up>", self.cycle_command_history_up)
+        self.input_area.bind("<Down>", self.cycle_command_history_down)
 
     def setup_zone_ui(self, zone_frame):
         self.zone_listbox = tk.Listbox(zone_frame, height=10)
         self.zone_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
-        self.populate_zones()
         self.zone_listbox.bind('<<ListboxSelect>>', self.map_viewer.on_zone_select)
 
     def setup_toolbar(self):
         bg_color = self.config.get('Visuals', 'BackgroundColor', fallback='white')
         self.toolbar = tk.Frame(self.map_viewer.this.master, bd=1, relief=tk.RAISED, bg=bg_color)
-        self.update_pos_toggle_btn = tk.Button(self.toolbar, text="Toggle", bg="lightgrey",
-                                               command=self.toggle_update_position, width=5, height=1)
+        self.update_pos_toggle_btn = tk.Button(self.toolbar, text="Enable Tracking", bg="lightgrey",
+                                               command=self.toggle_update_position, width=15, height=1)
         self.update_pos_toggle_btn.pack(side=tk.LEFT, padx=2, pady=2)
         self.toolbar.pack(side=tk.TOP, fill=tk.X, before=self.map_viewer.this)
 
@@ -173,3 +181,29 @@ class MainWindow:
             self.update_pos_toggle_btn.config(bg="green")
         else:
             self.update_pos_toggle_btn.config(bg="lightgrey")
+
+    def cycle_command_history_up(self, event):
+        if self.command_history:
+            if self.command_history_index == -1:
+                self.current_input = self.input_area.get()
+            self.command_history_index += 1
+            if self.command_history_index >= len(self.command_history):
+                self.command_history_index = len(self.command_history) - 1
+            command = self.command_history[-self.command_history_index - 1]
+            self.input_area.delete(0, tk.END)
+            self.input_area.insert(0, command)
+        return "break"
+
+    def cycle_command_history_down(self, event):
+        if self.command_history:
+            self.command_history_index -= 1
+            if self.command_history_index < -1:
+                self.command_history_index = -1
+                self.input_area.delete(0, tk.END)
+                if self.command_history_index == -1:
+                    self.input_area.insert(0, self.current_input)
+                return "break"
+            command = self.command_history[-self.command_history_index - 1]
+            self.input_area.delete(0, tk.END)
+            self.input_area.insert(0, command)
+        return "break"

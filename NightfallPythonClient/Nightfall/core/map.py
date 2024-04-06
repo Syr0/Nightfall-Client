@@ -81,16 +81,13 @@ class MapViewer:
         shadow_offset = 6
         tag_id = str(room_id)
 
-
         shadow_tag = f"{tag_id}_shadow"
         self.create_rounded_rectangle(x - box_size + shadow_offset, y - box_size + shadow_offset,
                                       x + box_size + shadow_offset, y + box_size + shadow_offset, radius=10,
                                       fill="gray20", tags=(shadow_tag,))
-
         room_tag = f"{tag_id}_room"
         self.create_rounded_rectangle(x - box_size, y - box_size, x + box_size, y + box_size, radius=10,
                                       fill=self.room_color, tags=(room_tag,))
-
         self.this.tag_bind(room_tag, "<Enter>", lambda e, id=room_id: self.show_room_name(e, id))
         self.this.tag_bind(room_tag, "<Leave>", self.hide_room_name)
 
@@ -109,8 +106,7 @@ class MapViewer:
                 if (from_id, to_id) in bidirectional:
                     self.this.create_line(from_pos[0], from_pos[1], to_pos[0], to_pos[1], fill=self.room_color)
                 else:
-                    self.this.create_line(from_pos[0], from_pos[1], to_pos[0], to_pos[1], arrow=tk.LAST,
-                                          fill=self.room_color)
+                    self.this.create_line(from_pos[0], from_pos[1], to_pos[0], to_pos[1], arrow=tk.LAST,fill=self.room_color)
 
     def draw_map(self, rooms, exits):
         total_x, total_y, count = 0, 0, 0
