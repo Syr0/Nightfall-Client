@@ -148,11 +148,6 @@ class MainWindow:
             self.auto_walker.analyze_response(message)
             self.awaiting_response_for_command = False
 
-    def on_login_success(self):
-        initial_commands = self.config.get('InitialCommands', 'commands').split(',')
-        for command in initial_commands:
-            self.connection.send(command.strip())
-
     def setup_console_ui(self, console_frame):
         bg_color = self.config.get('Font', 'background_color')
         font_color = self.config.get('Font', 'color')

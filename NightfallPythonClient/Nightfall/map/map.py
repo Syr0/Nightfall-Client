@@ -1,3 +1,11 @@
+#These are you tasks:
+#1) when a player enter a room with a different zone then the current one, show that zone in the UI
+#2) when a player moves up or down, ensure to clean the current map view and redraw the equivalent level of map. ensure there can be multiple levels in one zone. do not draw all of them on one map, but on several levels on one map.
+#3) make these levels switchable by a +1 and -1 buttons on the top right inside the canvas. show the current level right beside it
+# Print me whole functions to adapt / create. do not use placeholders or comments
+
+
+
 #map.py
 import os
 import tkinter as tk
@@ -5,10 +13,9 @@ import configparser
 
 from tkinter import ttk
 from core.database import fetch_rooms, fetch_zones, fetch_exits_with_zone_info, fetch_room_name, fetch_room_position, \
-    fetch_zone_name
+    fetch_zone_name, fetch_min_max_levels
 
 from gui.tooltip import ToolTip
-
 
 def calculate_direction(from_pos, to_pos):
     dir_x = to_pos[0] - from_pos[0]
@@ -18,7 +25,6 @@ def calculate_direction(from_pos, to_pos):
         return 0, 0
     return dir_x / mag, dir_y / mag
 
-
 class MapViewer:
     def __init__(self, parent, pane, root):
         self.current_room_id = None
@@ -26,15 +32,24 @@ class MapViewer:
         self.pane = pane
         self.root = root
         self.displayed_zone_id = None
+        self.current_level = 0
+        self.levels_dict = {}
+
         self.load_config()
 
         self.this = tk.Canvas(self.parent, bg=self.background_color)
         self.this.pack(fill=tk.BOTH, expand=True)
 
+        self.level_var = tk.StringVar()
+        self.level_var.set(f"Level: {self.current_level}")
+
+        self.initialize_level_ui()
+
         self.zone_dict = self.fetch_zone_dict()
         self.setup_bindings()
         self.initialize_ui()
         self.tooltips = {}
+
 
     def initialize_ui(self):
         zone_listbox_frame = ttk.Frame(self.pane, width=200)
@@ -81,12 +96,28 @@ class MapViewer:
         if default_zone_id:
             self.display_zone(default_zone_id)
 
+    def initialize_level_ui(self):
+        self.level_frame = tk.Frame(self.this)
+        self.level_up_button = tk.Button(self.level_frame, text="+1", command=self.level_up)
+        self.level_down_button = tk.Button(self.level_frame, text="-1", command=self.level_down)
+        self.level_label = tk.Label(self.level_frame, textvariable=self.level_var)
+
+        self.level_up_button.pack(side=tk.LEFT)
+        self.level_label.pack(side=tk.LEFT)
+        self.level_down_button.pack(side=tk.LEFT)
+
+        self.level_frame.pack(side=tk.TOP, fill=tk.X)
+
     def display_zone(self, zone_id):
         self.displayed_zone_id = zone_id
-        rooms = fetch_rooms(zone_id)
+        self.this.delete("all")
+        rooms = fetch_rooms(zone_id, self.current_level)
         exits_info = self.exits_with_zone_info([room[0] for room in rooms])
         self.draw_map(rooms, exits_info)
+        self.update_level_ui()
 
+    def update_level_ui(self):
+        self.level_var.set(f"Level: {self.current_level}")
     def exits_with_zone_info(self, from_obj_ids):
         exits_info = fetch_exits_with_zone_info(from_obj_ids)
         detailed_exits_info = []
@@ -147,7 +178,10 @@ class MapViewer:
         offset = room_size + shadow_offset + extra_padding
         min_x, min_y, max_x, max_y = float('inf'), float('inf'), float('-inf'), float('-inf')
 
-        for room_id, x, y, name in rooms:
+        for room_id, x, y, z, name in rooms:
+            if z != self.current_level:
+                continue
+
             self.draw_room_with_shadow(x, y, str(room_id), name)
             min_x, min_y = min(min_x, x - offset), min(min_y, y - offset)
             max_x, max_y = max(max_x, x + offset), max(max_y, y + offset)
@@ -170,6 +204,20 @@ class MapViewer:
                 if from_room_position:
                     x, y = from_room_position
                     self.place_zone_change_note(x, y, to_zone_name)
+        self.update_level_ui()
+
+    def level_up(self):
+        min_level, max_level = fetch_min_max_levels(self.displayed_zone_id)
+        if self.current_level < max_level:
+            self.current_level += 1
+            self.display_zone(self.displayed_zone_id)
+
+    def level_down(self):
+        min_level, max_level = fetch_min_max_levels(self.displayed_zone_id)
+        if self.current_level > min_level:
+            self.current_level -= 1
+            self.display_zone(self.displayed_zone_id)
+
     def place_zone_change_note(self, x, y, zone_name):
         note_text = f"To {zone_name}"
         self.this.create_text(x, y - 20, text=note_text, fill=self.note_color, font=('Helvetica', '10', 'bold'))
@@ -211,9 +259,9 @@ class MapViewer:
 
     def set_current_room(self, room_id):
         if self.current_room_id is not None:
-            self.map_viewer.unhighlight_room(self.current_room_id)
+            self.unhighlight_room(self.current_room_id)
         self.current_room_id = room_id
-        self.map_viewer.highlight_room(room_id)
+        self.highlight_room(room_id)
 
     def on_zone_select(self, event):
         selection = self.zone_listbox.curselection()

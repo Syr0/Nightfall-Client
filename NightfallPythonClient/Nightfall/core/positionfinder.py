@@ -1,7 +1,6 @@
 # positionfinder.py
 import threading
-from core.database import fetch_zone_name,fetch_room_descriptions, fetch_connected_rooms, fetch_room_zone_id, fetch_room_position, \
-    fetch_room_name
+from core.database import fetch_room_descriptions, fetch_connected_rooms, fetch_room_zone_id, fetch_room_name
 import Levenshtein
 
 class AutoWalker:
@@ -17,6 +16,9 @@ class AutoWalker:
         if self.current_room_id is not None:
             self.map_viewer.unhighlight_room(self.current_room_id)
         self.current_room_id = room_id
+        new_zone_id = fetch_room_zone_id(room_id)
+        if new_zone_id != self.map_viewer.displayed_zone_id:
+            self.map_viewer.root.after(0, lambda: self.map_viewer.display_zone(new_zone_id))
         self.map_viewer.highlight_room(room_id)
 
     def toggle_active(self):

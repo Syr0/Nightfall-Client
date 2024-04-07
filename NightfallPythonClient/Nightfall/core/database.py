@@ -14,8 +14,6 @@ import pyodbc
 #PortalTbl contains all portals, ways that can be entered from anywhere and cannot be drawn as such.
 #ZoneTbl contains the Zones of the map. ZoneID references it Name is the caption. MinX MinY MaxX and MaxY show the total size of the zone. Dx and Dy the position and XOffset and YOffset how much they need to be movr to match upper and lower layers.X and Y seems to be the latest view center
 
-#logging.basicConfig(level=logging.INFO, filename="database_logs.log", filemode='w',format='%(asctime)s - %(levelname)s - %(message)s')
-
 DB_FILE = r"..\..\Map.mdb"
 MEMORY_CONN = None
 DB_LOCK = threading.Lock()
@@ -24,14 +22,12 @@ ROOM_DESCRIPTION_CACHE = {}
 
 
 def load_access_db_to_memory():
-    """Loads the Access database into an in-memory SQLite database."""
     global MEMORY_CONN
     logging.info("Starting to load Access DB into memory.")
 
     tables_to_copy = ['DirTbl', 'ExitKindTbl', 'ExitTbl', 'NoteTbl', 'ObjectTbl', 'PortalTbl', 'ZoneTbl']
 
     try:
-        # Set check_same_thread to False to allow the connection to be used in multiple threads
         MEMORY_CONN = sqlite3.connect(":memory:", check_same_thread=False)
         access_conn_str = f'DRIVER={{Microsoft Access Driver (*.mdb, *.accdb)}};DBQ={DB_FILE}'
         with pyodbc.connect(access_conn_str) as access_conn:
@@ -59,7 +55,6 @@ def find_access_driver():
     return next((driver for driver in pyodbc.drivers() if 'ACCESS' in driver.upper()), None)
 
 def execute_query(query, params=(), fetch_one=False):
-    """Executes a query on the in-memory SQLite database."""
     with DB_LOCK, MEMORY_CONN:
         cursor = MEMORY_CONN.cursor()
         cursor.execute(query, params)
@@ -68,8 +63,19 @@ def execute_query(query, params=(), fetch_one=False):
 def fetch_zones():
     return execute_query("SELECT ZoneID, Name FROM ZoneTbl")
 
-def fetch_rooms(zone_id):
-    return execute_query("SELECT ObjID, X, Y, Name FROM ObjectTbl WHERE ZoneID = ?", (zone_id,))
+def fetch_min_max_levels(zone_id):
+    min_level = execute_query("SELECT MIN(Z) FROM ObjectTbl WHERE ZoneID = ?", (zone_id,))[0][0]
+    max_level = execute_query("SELECT MAX(Z) FROM ObjectTbl WHERE ZoneID = ?", (zone_id,))[0][0]
+    return min_level, max_level
+
+def fetch_rooms(zone_id, z=None):
+    query = "SELECT ObjID, X, Y, Z, Name FROM ObjectTbl WHERE ZoneID = ?"
+    params = [zone_id]
+
+    if z is not None:
+        query += " AND Z = ?"
+        params.append(z)
+    return execute_query(query, params)
 
 def fetch_exits_with_zone_info(from_obj_ids):
     placeholders = ','.join('?' for _ in from_obj_ids)
@@ -121,6 +127,16 @@ def fetch_zone_name(zone_id):
     result = execute_query(query, (zone_id,), fetch_one=True)
     return result[0] if result else "Unknown Zone"
 
+def fetch_room_zone_id(room_id):
+    query = "SELECT ZoneID FROM ObjectTbl WHERE ObjID = ?"
+    result = execute_query(query, (room_id,), fetch_one=True)
+    if result:
+        return result[0]
+    else:
+        logging.info(f"No ZoneID found for RoomID: {room_id}")
+        return None
+
+
 load_access_db_to_memory()
 
 access_driver = (find_access_driver())
@@ -130,11 +146,3 @@ if access_driver is None:
     webbrowser.open("https://www.microsoft.com/en-us/download/details.aspx?id=54920")
 
 
-def fetch_room_zone_id(room_id):
-    query = "SELECT ZoneID FROM ObjectTbl WHERE ObjID = ?"
-    result = execute_query(query, (room_id,), fetch_one=True)
-    if result:
-        return result[0]
-    else:
-        logging.info(f"No ZoneID found for RoomID: {room_id}")
-        return None
