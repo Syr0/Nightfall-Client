@@ -116,6 +116,8 @@ class MapViewer:
         return min_x - padding, min_y - padding, max_x + padding, max_y + padding
 
     def change_level(self, delta):
+        self.camera.log_current_position()
+
         print(f"Changing Level: Current Level = {self.current_level}, Delta = {delta}")
         new_level = self.current_level + delta
         self.current_level = new_level

@@ -16,8 +16,8 @@ class Camera:
 
     def on_pan(self, event):
         self.canvas.scan_dragto(event.x, event.y, gain=1)
-        dx = event.x - self.start_pan_pos[0]
-        dy = event.y - self.start_pan_pos[1]
+        dx = (self.start_pan_pos[0] - event.x) / self.zoom
+        dy = (self.start_pan_pos[1] - event.y) / self.zoom
         self.position = (self.position[0] + dx, self.position[1] + dy)
         self.start_pan_pos = (event.x, event.y)
 
@@ -27,6 +27,7 @@ class Camera:
         factor = 1.001 ** event.delta
         self.zoom *= factor
         self.canvas.scale("all", x, y, factor, factor)
+        self.position = ((self.position[0] - x) * factor + x, (self.position[1] - y) * factor + y)
         self.update_scroll_region()
 
     def update_scroll_region(self):
@@ -37,12 +38,21 @@ class Camera:
         self.zoom = 1.0
         self.canvas.scale("all", 0, 0, self.zoom, self.zoom)
         self.canvas.configure(scrollregion=bounds)
-        self.canvas.xview_moveto(0)
-        self.canvas.yview_moveto(0)
+        self.canvas.xview_moveto(0.5)
+        self.canvas.yview_moveto(0.5)
 
     def apply_current_zoom(self):
         self.canvas.scale("all", 0, 0, self.zoom, self.zoom)
         self.update_scroll_region()
-        # Ensure the position is updated to reflect current zoom and pan state
-        self.canvas.xview_moveto(self.position[0] / self.canvas.winfo_width())
-        self.canvas.yview_moveto(self.position[1] / self.canvas.winfo_height())
+        bbox = self.canvas.bbox("all") or (0, 0, 0, 0)
+        scrollregion_width = bbox[2] - bbox[0]
+        scrollregion_height = bbox[3] - bbox[1]
+        canvas_width = self.canvas.winfo_width()
+        canvas_height = self.canvas.winfo_height()
+        x_center_ratio = (self.position[0] - canvas_width / 2) / scrollregion_width
+        y_center_ratio = (self.position[1] - canvas_height / 2) / scrollregion_height
+        self.canvas.xview_moveto(x_center_ratio)
+        self.canvas.yview_moveto(y_center_ratio)
+
+    def log_current_position(self):
+        print(f"Camera Position (Center): X = {self.position[0]}, Y = {self.position[1]}")
