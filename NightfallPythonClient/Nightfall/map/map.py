@@ -79,10 +79,6 @@ class MapViewer:
         zones = fetch_zones()
         return {zone[1]: zone[0] for zone in zones}
 
-    def draw_initial_map(self):
-        default_zone_id = self.zone_dict.get(self.default_zone, None)
-        if default_zone_id:
-            self.display_zone(default_zone_id)
 
     def initialize_level_ui(self):
         self.level_frame = tk.Frame(self.this)
@@ -97,10 +93,6 @@ class MapViewer:
         self.draw_map(rooms, exits_info)
         self.camera.apply_current_zoom()
         print(f"Display Zone: Zone ID = {zone_id}, Level = {self.current_level}, Camera Zoom = {self.camera.zoom}")
-
-    def reset_view_to_fit_zone(self):
-        bounds = self.calculate_bounds()
-        self.camera.reset_camera(bounds)
 
     def calculate_bounds(self):
         rooms = fetch_rooms(self.displayed_zone_id, z=self.current_level)
@@ -124,24 +116,6 @@ class MapViewer:
         self.display_zone(self.displayed_zone_id, preserve_view=True)
         print(f"Level Change Complete: New Level = {self.current_level}")
 
-    def restore_view(self, view):
-        scroll_x, scroll_y, scale, x1, y1, x2, y2 = view
-        self.scale = scale
-        self.this.scale('all', 0, 0, scale, scale)
-        self.this.configure(scrollregion=(x1, y1, x2, y2))
-
-        canvas_width = self.this.winfo_width()
-        canvas_height = self.this.winfo_height()
-
-        scaled_width = (x2 - x1) * scale
-        scaled_height = (y2 - y1) * scale
-
-        new_scroll_x = scroll_x * scaled_width / canvas_width
-        new_scroll_y = scroll_y * scaled_height / canvas_height
-
-        self.this.xview_moveto(new_scroll_x / scaled_width)
-        self.this.yview_moveto(new_scroll_y / scaled_height)
-
     def capture_current_view(self):
         bbox = self.this.bbox("all")
         if bbox is None:
@@ -151,18 +125,6 @@ class MapViewer:
             scroll_x = self.this.xview()[0]
             scroll_y = self.this.yview()[0]
             return (scroll_x, scroll_y, self.scale, x1, y1, x2, y2)
-
-    def get_canvas_scroll_position(self):
-        x = self.this.xview()[0]
-        y = self.this.yview()[0]
-        return x, y
-
-    def set_canvas_scroll_position(self, x, y):
-        self.this.xview_moveto(x)
-        self.this.yview_moveto(y)
-
-    def update_level_ui(self):
-        self.level_var.set(f"Level: {self.current_level}")
 
     def exits_with_zone_info(self, from_obj_ids):
         exits_info = fetch_exits_with_zone_info(from_obj_ids)
@@ -211,11 +173,6 @@ class MapViewer:
                     self.this.create_line(from_pos[0], from_pos[1], to_pos[0], to_pos[1], fill=self.room_color)
                 else:
                     self.this.create_line(from_pos[0], from_pos[1], to_pos[0], to_pos[1], arrow=tk.LAST,fill=self.room_color)
-    def draw_exit_with_note(self, from_x, from_y, dir_x, dir_y, note):
-        end_x, end_y = from_x + dir_x * 100, from_y + dir_y * 100
-        self.this.create_line(from_x, from_y, end_x, end_y, fill=self.note_color, arrow=tk.LAST)
-        self.this.create_text(end_x, end_y, text=note, fill=self.note_color, anchor="w")
-
     def draw_map(self, rooms, exits_info):
         total_x, total_y, count = 0, 0, 0
         room_size = 20
@@ -268,12 +225,6 @@ class MapViewer:
             tooltip.hide_tip()
         self.this.unbind("<Motion>")
 
-    def set_current_room(self, room_id):
-        if self.current_room_id is not None:
-            self.unhighlight_room(self.current_room_id)
-        self.current_room_id = room_id
-        self.highlight_room(room_id)
-
     def on_zone_select(self, event):
         selection = event.widget.curselection()
         if selection:
@@ -282,13 +233,6 @@ class MapViewer:
             zone_id = self.zone_dict[zone_name]
             self.current_level = 0
             self.display_zone(zone_id)
-    def select_default_zone(self,zone_listbox):
-        try:
-            index = list(self.zone_dict.keys()).index(self.default_zone)
-            zone_listbox.select_set(index)
-            zone_listbox.event_generate("<<ListboxSelect>>")
-        except ValueError:
-            print(f"Default zone '{self.default_zone}' not found.")
 
     def unhighlight_room(self, room_id):
         room_tag = f"{room_id}_room"
@@ -301,7 +245,3 @@ class MapViewer:
 
         room_tag = f"{room_id}_room"
         self.this.itemconfig(room_tag, fill="#FF6EC7")
-
-    def draw_zone_change_note(self, x, y, zone_name):
-        note_text = f"To {zone_name}"
-        self.this.create_text(x, y - 30, text=note_text, fill="blue", font=('Helvetica', '10', 'bold'))
