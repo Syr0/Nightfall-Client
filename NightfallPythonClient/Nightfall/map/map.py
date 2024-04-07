@@ -27,14 +27,18 @@ def calculate_direction(from_pos, to_pos):
 
 class MapViewer:
     def __init__(self, parent, pane, root):
-        self.current_room_id = None
         self.parent = parent
         self.pane = pane
         self.root = root
+        self.current_room_id = None
         self.displayed_zone_id = None
+        self.global_view_state = None
         self.current_level = 0
-        self.levels_dict = {}
         self.scale = 1.0
+        self.levels_dict = {}
+        self.camera_zoom = 1.0
+        self.camera_position = (0, 0)
+        self.last_x, self.last_y = 0, 0
 
         self.load_config()
 
@@ -50,6 +54,8 @@ class MapViewer:
         self.setup_bindings()
         self.initialize_ui()
         self.tooltips = {}
+
+        self.global_view_state = self.capture_current_view()
 
 
     def initialize_ui(self):
@@ -110,29 +116,36 @@ class MapViewer:
         self.level_frame.pack(side=tk.TOP, fill=tk.X)
 
     def display_zone(self, zone_id, preserve_view=False):
-        if preserve_view:
-            current_view = self.capture_current_view()
-        else:
-            current_view = None
-
+        if not preserve_view:
+            self.global_view_state = self.capture_current_view()
         self.displayed_zone_id = zone_id
         self.this.delete("all")
         rooms = fetch_rooms(zone_id, z=self.current_level)
         exits_info = self.exits_with_zone_info([room[0] for room in rooms])
         self.draw_map(rooms, exits_info)
-
-        if preserve_view and current_view:
-            self.restore_view(current_view)
-        self.update_level_ui()
+        if preserve_view:
+            self.restore_view(self.global_view_state)
+        else:
+            self.update_camera_view()
 
     def restore_view(self, view):
         scroll_x, scroll_y, scale, x1, y1, x2, y2 = view
         self.scale = scale
         self.this.scale("all", 0, 0, scale, scale)
-        self.this.xview_moveto(scroll_x)
-        self.this.yview_moveto(scroll_y)
-        self.this.configure(scrollregion=(x1, y1, x2, y2))
-        self.adjust_scrollregion()
+        self.this.configure(scrollregion=(x1, y1, x2 * scale, y2 * scale))
+
+        canvas_width = self.this.winfo_width()
+        canvas_height = self.this.winfo_height()
+
+        scaled_width = (x2 - x1) * scale
+        scaled_height = (y2 - y1) * scale
+
+        new_scroll_x = scroll_x * scaled_width / canvas_width
+        new_scroll_y = scroll_y * scaled_height / canvas_height
+
+        self.this.xview_moveto(new_scroll_x / scaled_width)
+        self.this.yview_moveto(new_scroll_y / scaled_height)
+
     def capture_current_view(self):
         bbox = self.this.bbox("all")
         if bbox is None:
@@ -257,19 +270,30 @@ class MapViewer:
         self.this.create_text(x, y - 20, text=note_text, fill=self.note_color, font=('Helvetica', '10', 'bold'))
 
     def on_mousewheel(self, event):
-        scale = 1.0
         x = self.this.canvasx(event.x)
         y = self.this.canvasy(event.y)
-        factor = 1.001 ** event.delta
-        self.scale *= factor
-        self.this.scale("all", x, y, factor, factor)
+        factor = 1.0
+        if event.delta > 0:
+            factor = 1.1
+        else:
+            factor = 0.9
+        self.this.scale('all', x, y, factor, factor)
         self.adjust_scrollregion()
 
     def on_middle_click(self, event):
         self.this.scan_mark(event.x, event.y)
+        self.last_x, self.last_y = event.x, event.y
+
 
     def on_middle_move(self, event):
         self.this.scan_dragto(event.x, event.y, gain=1)
+        self.last_x, self.last_y = event.x, event.y
+
+    def update_camera_view(self):
+        self.this.scale("all", 0, 0, 1.0 / self.scale, 1.0 / self.scale)
+        self.scale = self.camera_zoom
+        self.this.scale("all", 0, 0, self.scale, self.scale)
+        self.this.configure(scrollregion=self.this.bbox("all"))
 
     def adjust_scrollregion(self):
         self.this.configure(scrollregion=self.this.bbox(tk.ALL))
@@ -297,18 +321,13 @@ class MapViewer:
         self.highlight_room(room_id)
 
     def on_zone_select(self, event):
-        selection = self.zone_listbox.curselection()
+        selection = event.widget.curselection()
         if selection:
-            index = self.zone_listbox.curselection()[0]
-            zone_name = self.zone_listbox.get(index)
+            index = selection[0]
+            zone_name = event.widget.get(index)
             zone_id = self.zone_dict[zone_name]
+            self.current_level = 0
             self.display_zone(zone_id)
-            rooms = fetch_rooms(zone_id)
-            exits_info = self.exits_with_zone_info([room[0] for room in rooms])
-
-            self.this.delete("all")
-            self.draw_map(rooms, exits_info)
-
     def select_default_zone(self,zone_listbox):
         try:
             index = list(self.zone_dict.keys()).index(self.default_zone)
