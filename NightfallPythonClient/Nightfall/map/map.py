@@ -1,11 +1,3 @@
-#These are you tasks:
-#1) when a player enter a room with a different zone then the current one, show that zone in the UI
-#2) when a player moves up or down, ensure to clean the current map view and redraw the equivalent level of map. ensure there can be multiple levels in one zone. do not draw all of them on one map, but on several levels on one map.
-#3) make these levels switchable by a +1 and -1 buttons on the top right inside the canvas. show the current level right beside it
-# Print me whole functions to adapt / create. do not use placeholders or comments
-
-
-
 #map.py
 import os
 import tkinter as tk
@@ -14,7 +6,7 @@ import configparser
 from tkinter import ttk
 from core.database import fetch_rooms, fetch_zones, fetch_exits_with_zone_info, fetch_room_name, fetch_room_position, \
     fetch_zone_name, fetch_min_max_levels
-
+import map.camera
 from gui.tooltip import ToolTip
 
 def calculate_direction(from_pos, to_pos):
@@ -36,14 +28,11 @@ class MapViewer:
         self.current_level = 0
         self.scale = 1.0
         self.levels_dict = {}
-        self.camera_zoom = 1.0
-        self.camera_position = (0, 0)
-        self.last_x, self.last_y = 0, 0
-
         self.load_config()
 
         self.this = tk.Canvas(self.parent, bg=self.background_color)
         self.this.pack(fill=tk.BOTH, expand=True)
+        self.camera = map.camera.Camera(self.this)
 
         self.level_var = tk.StringVar()
         self.level_var.set(f"Level: {self.current_level}")
@@ -51,7 +40,6 @@ class MapViewer:
         self.initialize_level_ui()
 
         self.zone_dict = self.fetch_zone_dict()
-        self.setup_bindings()
         self.initialize_ui()
         self.tooltips = {}
 
@@ -70,8 +58,6 @@ class MapViewer:
     def set_parent(self, parent):
         self.parent = parent
         self.initialize_canvas()
-        self.setup_bindings()
-
     def initialize_canvas(self):
         self.this = tk.Canvas(self.parent, bg=self.background_color)
         self.this.pack(fill=tk.BOTH, expand=True)
@@ -89,11 +75,6 @@ class MapViewer:
         self.default_zone = config['General']['DefaultZone']
         self.note_color = config['Visuals'].get('ZoneLeavingColor', '#FFA500')
 
-    def setup_bindings(self):
-        self.this.bind("<MouseWheel>", self.on_mousewheel)
-        self.this.bind("<Button-2>", self.on_middle_click)
-        self.this.bind("<B2-Motion>", self.on_middle_move)
-
     def fetch_zone_dict(self):
         zones = fetch_zones()
         return {zone[1]: zone[0] for zone in zones}
@@ -105,34 +86,43 @@ class MapViewer:
 
     def initialize_level_ui(self):
         self.level_frame = tk.Frame(self.this)
-        self.level_up_button = tk.Button(self.level_frame, text="+1", command=self.level_up)
-        self.level_down_button = tk.Button(self.level_frame, text="-1", command=self.level_down)
-        self.level_label = tk.Label(self.level_frame, textvariable=self.level_var)
-
-        self.level_up_button.pack(side=tk.LEFT)
-        self.level_label.pack(side=tk.LEFT)
-        self.level_down_button.pack(side=tk.LEFT)
-
         self.level_frame.pack(side=tk.TOP, fill=tk.X)
 
-    def display_zone(self, zone_id, preserve_view=False):
-        if not preserve_view:
-            self.global_view_state = self.capture_current_view()
+    def display_zone(self, zone_id, preserve_view=False, centered_room_id=None):
         self.displayed_zone_id = zone_id
         self.this.delete("all")
         rooms = fetch_rooms(zone_id, z=self.current_level)
         exits_info = self.exits_with_zone_info([room[0] for room in rooms])
+        if not preserve_view:
+            bounds = self.calculate_bounds()
+            self.camera.reset_camera(bounds)
         self.draw_map(rooms, exits_info)
-        if preserve_view:
-            self.restore_view(self.global_view_state)
-        else:
-            self.update_camera_view()
+
+    def calculate_bounds(self):
+        rooms = fetch_rooms(self.displayed_zone_id, z=self.current_level)
+        if not rooms:
+            return 0, 0, 100, 100
+
+        min_x = min(room[1] for room in rooms)
+        min_y = min(room[2] for room in rooms)
+        max_x = max(room[1] for room in rooms)
+        max_y = max(room[2] for room in rooms)
+
+        padding = 20
+        return min_x - padding, min_y - padding, max_x + padding, max_y + padding
+
+
+    def change_level(self, delta):
+        new_level = self.current_level + delta
+        self.current_level = new_level
+        self.level_var.set(f"Level: {self.current_level}")
+        self.display_zone(self.displayed_zone_id, preserve_view=True)
 
     def restore_view(self, view):
         scroll_x, scroll_y, scale, x1, y1, x2, y2 = view
         self.scale = scale
-        self.this.scale("all", 0, 0, scale, scale)
-        self.this.configure(scrollregion=(x1, y1, x2 * scale, y2 * scale))
+        self.this.scale('all', 0, 0, scale, scale)
+        self.this.configure(scrollregion=(x1, y1, x2, y2))
 
         canvas_width = self.this.winfo_width()
         canvas_height = self.this.winfo_height()
@@ -160,11 +150,14 @@ class MapViewer:
         x = self.this.xview()[0]
         y = self.this.yview()[0]
         return x, y
+
     def set_canvas_scroll_position(self, x, y):
         self.this.xview_moveto(x)
         self.this.yview_moveto(y)
+
     def update_level_ui(self):
         self.level_var.set(f"Level: {self.current_level}")
+
     def exits_with_zone_info(self, from_obj_ids):
         exits_info = fetch_exits_with_zone_info(from_obj_ids)
         detailed_exits_info = []
@@ -236,10 +229,6 @@ class MapViewer:
             total_y += y
             count += 1
 
-        if count > 0:
-            center_x, center_y = total_x / count, total_y / count
-            self.this.create_oval(center_x - 20, center_y - 20, center_x + 20, center_y + 20, fill="yellow",
-                                  outline="yellow", tags="center_of_mass")
         self.drawn_bounds = (min_x, min_y, max_x, max_y)
         self.draw_exits(rooms, [exit[:2] for exit in exits_info])
 
@@ -251,52 +240,11 @@ class MapViewer:
                 if from_room_position:
                     x, y = from_room_position
                     self.place_zone_change_note(x, y, to_zone_name)
-        self.update_level_ui()
-
-    def level_up(self):
-        min_level, max_level = fetch_min_max_levels(self.displayed_zone_id)
-        if self.current_level < max_level:
-            self.current_level += 1
-            self.display_zone(self.displayed_zone_id, preserve_view=True)
-
-    def level_down(self):
-        min_level, max_level = fetch_min_max_levels(self.displayed_zone_id)
-        if self.current_level > min_level:
-            self.current_level -= 1
-            self.display_zone(self.displayed_zone_id, preserve_view=True)
 
     def place_zone_change_note(self, x, y, zone_name):
         note_text = f"To {zone_name}"
         self.this.create_text(x, y - 20, text=note_text, fill=self.note_color, font=('Helvetica', '10', 'bold'))
 
-    def on_mousewheel(self, event):
-        x = self.this.canvasx(event.x)
-        y = self.this.canvasy(event.y)
-        factor = 1.0
-        if event.delta > 0:
-            factor = 1.1
-        else:
-            factor = 0.9
-        self.this.scale('all', x, y, factor, factor)
-        self.adjust_scrollregion()
-
-    def on_middle_click(self, event):
-        self.this.scan_mark(event.x, event.y)
-        self.last_x, self.last_y = event.x, event.y
-
-
-    def on_middle_move(self, event):
-        self.this.scan_dragto(event.x, event.y, gain=1)
-        self.last_x, self.last_y = event.x, event.y
-
-    def update_camera_view(self):
-        self.this.scale("all", 0, 0, 1.0 / self.scale, 1.0 / self.scale)
-        self.scale = self.camera_zoom
-        self.this.scale("all", 0, 0, self.scale, self.scale)
-        self.this.configure(scrollregion=self.this.bbox("all"))
-
-    def adjust_scrollregion(self):
-        self.this.configure(scrollregion=self.this.bbox(tk.ALL))
 
     def show_room_name(self, event, room_id, event_x, event_y):
         room_name = fetch_room_name(room_id)
@@ -351,4 +299,3 @@ class MapViewer:
     def draw_zone_change_note(self, x, y, zone_name):
         note_text = f"To {zone_name}"
         self.this.create_text(x, y - 30, text=note_text, fill="blue", font=('Helvetica', '10', 'bold'))
-

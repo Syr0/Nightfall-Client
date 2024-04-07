@@ -170,10 +170,22 @@ class MainWindow:
     def setup_toolbar(self):
         bg_color = self.config.get('Visuals', 'BackgroundColor', fallback='white')
         self.toolbar = tk.Frame(self.map_viewer.this.master, bd=1, relief=tk.RAISED, bg=bg_color)
+
         self.update_pos_toggle_btn = tk.Button(self.toolbar, text="Enable Tracking", bg="lightgrey",
                                                command=self.toggle_update_position, width=15, height=1)
         self.update_pos_toggle_btn.pack(side=tk.LEFT, padx=2, pady=2)
+        self.level_up_btn = tk.Button(self.toolbar, text="Level Up", command=self.level_up, width=10, height=1)
+        self.level_up_btn.pack(side=tk.LEFT, padx=2, pady=2)
+        self.level_down_btn = tk.Button(self.toolbar, text="Level Down", command=self.level_down, width=10, height=1)
+        self.level_down_btn.pack(side=tk.LEFT, padx=2, pady=2)
+
         self.toolbar.pack(side=tk.TOP, fill=tk.X, before=self.map_viewer.this)
+
+    def level_up(self):
+        self.map_viewer.change_level(1)
+
+    def level_down(self):
+        self.map_viewer.change_level(-1)
 
     def toggle_update_position(self):
         self.update_position_active = not self.update_position_active
