@@ -33,14 +33,6 @@ class Camera:
     def update_scroll_region(self):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
 
-    def reset_camera(self, bounds):
-        self.position = (0, 0)
-        self.zoom = 1.0
-        self.canvas.scale("all", 0, 0, self.zoom, self.zoom)
-        self.canvas.configure(scrollregion=bounds)
-        self.canvas.xview_moveto(0.5)
-        self.canvas.yview_moveto(0.5)
-
     def apply_current_zoom(self):
         self.canvas.scale("all", 0, 0, self.zoom, self.zoom)
         self.update_scroll_region()

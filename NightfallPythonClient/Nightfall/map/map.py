@@ -5,7 +5,7 @@ import configparser
 
 from tkinter import ttk
 from core.database import fetch_rooms, fetch_zones, fetch_exits_with_zone_info, fetch_room_name, fetch_room_position, \
-    fetch_zone_name, fetch_min_max_levels
+    fetch_zone_name
 import map.camera
 from gui.tooltip import ToolTip
 
@@ -93,19 +93,6 @@ class MapViewer:
         self.draw_map(rooms, exits_info)
         self.camera.apply_current_zoom()
         print(f"Display Zone: Zone ID = {zone_id}, Level = {self.current_level}, Camera Zoom = {self.camera.zoom}")
-
-    def calculate_bounds(self):
-        rooms = fetch_rooms(self.displayed_zone_id, z=self.current_level)
-        if not rooms:
-            return 0, 0, 100, 100
-
-        min_x = min(room[1] for room in rooms)
-        min_y = min(room[2] for room in rooms)
-        max_x = max(room[1] for room in rooms)
-        max_y = max(room[2] for room in rooms)
-
-        padding = 20
-        return min_x - padding, min_y - padding, max_x + padding, max_y + padding
 
     def change_level(self, delta):
         self.camera.log_current_position()
