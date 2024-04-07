@@ -55,9 +55,6 @@ class MapViewer:
         self.zone_listbox.bind('<<ListboxSelect>>', self.on_zone_select)
         self.pane.add(zone_listbox_frame, weight=1)
 
-    def set_parent(self, parent):
-        self.parent = parent
-        self.initialize_canvas()
     def initialize_canvas(self):
         self.this = tk.Canvas(self.parent, bg=self.background_color)
         self.this.pack(fill=tk.BOTH, expand=True)

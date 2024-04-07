@@ -1,3 +1,5 @@
+#change the code. Ensure the resizing of the window does not alter the results. when changeing the levels, the camera is still the same. but the map shown is not the same. make the code more robust against accidential changes on offsets of the map. ensure the drawing always happens with the same roomid (the lowest) on the same position (0,0) with the same zoom factor (1). Apply the camera view after the map was drawn. draw all levels on seperate and switch between them, but ensure they are all correctly offsetted to 0,0. changeing the level should only show other data, but not cause a map-redrawing. that is just a task for the camera
+
 #camera.py
 class Camera:
     def __init__(self, canvas, initial_position=(0, 0), initial_zoom=1.0):
