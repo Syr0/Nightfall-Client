@@ -93,10 +93,14 @@ class MapViewer:
         self.this.delete("all")
         rooms = fetch_rooms(zone_id, z=self.current_level)
         exits_info = self.exits_with_zone_info([room[0] for room in rooms])
-        if not preserve_view:
-            bounds = self.calculate_bounds()
-            self.camera.reset_camera(bounds)
+
         self.draw_map(rooms, exits_info)
+        self.camera.apply_current_zoom()
+        print(f"Display Zone: Zone ID = {zone_id}, Level = {self.current_level}, Camera Zoom = {self.camera.zoom}")
+
+    def reset_view_to_fit_zone(self):
+        bounds = self.calculate_bounds()
+        self.camera.reset_camera(bounds)
 
     def calculate_bounds(self):
         rooms = fetch_rooms(self.displayed_zone_id, z=self.current_level)
@@ -111,12 +115,12 @@ class MapViewer:
         padding = 20
         return min_x - padding, min_y - padding, max_x + padding, max_y + padding
 
-
     def change_level(self, delta):
+        print(f"Changing Level: Current Level = {self.current_level}, Delta = {delta}")
         new_level = self.current_level + delta
         self.current_level = new_level
-        self.level_var.set(f"Level: {self.current_level}")
         self.display_zone(self.displayed_zone_id, preserve_view=True)
+        print(f"Level Change Complete: New Level = {self.current_level}")
 
     def restore_view(self, view):
         scroll_x, scroll_y, scale, x1, y1, x2, y2 = view
