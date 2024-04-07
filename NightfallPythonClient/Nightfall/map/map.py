@@ -34,6 +34,7 @@ class MapViewer:
         self.displayed_zone_id = None
         self.current_level = 0
         self.levels_dict = {}
+        self.scale = 1.0
 
         self.load_config()
 
@@ -108,14 +109,47 @@ class MapViewer:
 
         self.level_frame.pack(side=tk.TOP, fill=tk.X)
 
-    def display_zone(self, zone_id):
+    def display_zone(self, zone_id, preserve_view=False):
+        if preserve_view:
+            current_view = self.capture_current_view()
+        else:
+            current_view = None
+
         self.displayed_zone_id = zone_id
         self.this.delete("all")
-        rooms = fetch_rooms(zone_id, self.current_level)
+        rooms = fetch_rooms(zone_id, z=self.current_level)
         exits_info = self.exits_with_zone_info([room[0] for room in rooms])
         self.draw_map(rooms, exits_info)
+
+        if preserve_view and current_view:
+            self.restore_view(current_view)
         self.update_level_ui()
 
+    def restore_view(self, view):
+        scroll_x, scroll_y, scale, x1, y1, x2, y2 = view
+        self.scale = scale
+        self.this.scale("all", 0, 0, scale, scale)
+        self.this.xview_moveto(scroll_x)
+        self.this.yview_moveto(scroll_y)
+        self.this.configure(scrollregion=(x1, y1, x2, y2))
+        self.adjust_scrollregion()
+    def capture_current_view(self):
+        bbox = self.this.bbox("all")
+        if bbox is None:
+            return (0, 0, 1.0, 0, 0, 100, 100)
+        else:
+            x1, y1, x2, y2 = bbox
+            scroll_x = self.this.xview()[0]
+            scroll_y = self.this.yview()[0]
+            return (scroll_x, scroll_y, self.scale, x1, y1, x2, y2)
+
+    def get_canvas_scroll_position(self):
+        x = self.this.xview()[0]
+        y = self.this.yview()[0]
+        return x, y
+    def set_canvas_scroll_position(self, x, y):
+        self.this.xview_moveto(x)
+        self.this.yview_moveto(y)
     def update_level_ui(self):
         self.level_var.set(f"Level: {self.current_level}")
     def exits_with_zone_info(self, from_obj_ids):
@@ -210,13 +244,13 @@ class MapViewer:
         min_level, max_level = fetch_min_max_levels(self.displayed_zone_id)
         if self.current_level < max_level:
             self.current_level += 1
-            self.display_zone(self.displayed_zone_id)
+            self.display_zone(self.displayed_zone_id, preserve_view=True)
 
     def level_down(self):
         min_level, max_level = fetch_min_max_levels(self.displayed_zone_id)
         if self.current_level > min_level:
             self.current_level -= 1
-            self.display_zone(self.displayed_zone_id)
+            self.display_zone(self.displayed_zone_id, preserve_view=True)
 
     def place_zone_change_note(self, x, y, zone_name):
         note_text = f"To {zone_name}"
@@ -226,10 +260,9 @@ class MapViewer:
         scale = 1.0
         x = self.this.canvasx(event.x)
         y = self.this.canvasy(event.y)
-
         factor = 1.001 ** event.delta
-        self.this.scale(tk.ALL, x, y, factor, factor)
-        scale *= factor
+        self.scale *= factor
+        self.this.scale("all", x, y, factor, factor)
         self.adjust_scrollregion()
 
     def on_middle_click(self, event):
