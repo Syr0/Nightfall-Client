@@ -55,10 +55,6 @@ class MapViewer:
         self.zone_listbox.bind('<<ListboxSelect>>', self.on_zone_select)
         self.pane.add(zone_listbox_frame, weight=1)
 
-    def initialize_canvas(self):
-        self.this = tk.Canvas(self.parent, bg=self.background_color)
-        self.this.pack(fill=tk.BOTH, expand=True)
-
     def load_config(self):
         config_file_path = os.path.join(os.path.dirname(__file__), '../config/settings.ini')
         config = configparser.ConfigParser()
@@ -76,28 +72,29 @@ class MapViewer:
         zones = fetch_zones()
         return {zone[1]: zone[0] for zone in zones}
 
-
     def initialize_level_ui(self):
         self.level_frame = tk.Frame(self.this)
         self.level_frame.pack(side=tk.TOP, fill=tk.X)
 
-    def display_zone(self, zone_id, preserve_view=False, centered_room_id=None):
+    def display_zone(self, zone_id):
         self.displayed_zone_id = zone_id
         self.this.delete("all")
         rooms = fetch_rooms(zone_id, z=self.current_level)
         exits_info = self.exits_with_zone_info([room[0] for room in rooms])
 
         self.draw_map(rooms, exits_info)
+
         self.camera.apply_current_zoom()
         print(f"Display Zone: Zone ID = {zone_id}, Level = {self.current_level}, Camera Zoom = {self.camera.zoom}")
 
-    def change_level(self, delta):
-        self.camera.log_current_position()
 
+    def change_level(self, delta):
         print(f"Changing Level: Current Level = {self.current_level}, Delta = {delta}")
         new_level = self.current_level + delta
+
         self.current_level = new_level
-        self.display_zone(self.displayed_zone_id, preserve_view=True)
+        self.display_zone(self.displayed_zone_id)
+
         print(f"Level Change Complete: New Level = {self.current_level}")
 
     def capture_current_view(self):
@@ -168,7 +165,6 @@ class MapViewer:
         for room_id, x, y, z, name in rooms:
             if z != self.current_level:
                 continue
-
             self.draw_room_with_shadow(x, y, str(room_id), name)
             min_x, min_y = min(min_x, x - offset), min(min_y, y - offset)
             max_x, max_y = max(max_x, x + offset), max(max_y, y + offset)
