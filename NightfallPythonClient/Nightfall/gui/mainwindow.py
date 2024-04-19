@@ -149,8 +149,8 @@ class MainWindow:
             self.awaiting_response_for_command = False
 
     def setup_console_ui(self, console_frame):
-        bg_color = self.config.get('Font', 'background_color')
-        font_color = self.config.get('Font', 'color')
+        bg_color = self.config.get('Font', 'background_color', fallback='#000000')  # Black as fallback
+        font_color = self.config.get('Font', 'color', fallback='#FFFFFF')  # White as fallback
         self.text_area = tk.Text(console_frame, wrap=tk.WORD, state='disabled', bg=bg_color, fg=font_color)
         self.text_area.pack(fill=tk.BOTH, expand=True, side=tk.TOP)
         self.create_color_tags()
