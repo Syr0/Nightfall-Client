@@ -73,8 +73,13 @@ def fetch_rooms(zone_id, z=None):
     params = [zone_id]
 
     if z is not None:
-        query += " AND Z = ?"
-        params.append(z)
+        # Handle both NULL and specific z values - if z is 0, include NULL z values too
+        if z == 0:
+            query += " AND (Z = ? OR Z IS NULL)"
+            params.append(z)
+        else:
+            query += " AND Z = ?"
+            params.append(z)
     return execute_query(query, params)
 
 def fetch_exits_with_zone_info(from_obj_ids):
@@ -112,7 +117,11 @@ def fetch_zone_info():
 
 
 def fetch_room_position(room_id):
-    return execute_query("SELECT X, Y FROM ObjectTbl WHERE ObjID = ?", (room_id,), fetch_one=True)
+    result = execute_query("SELECT X, Y, Z FROM ObjectTbl WHERE ObjID = ?", (room_id,), fetch_one=True)
+    if result:
+        # Return x, y, and z (z might be None)
+        return result[0], result[1], result[2] if len(result) > 2 else None
+    return None
 
 
 def fetch_connected_rooms(current_room_id):

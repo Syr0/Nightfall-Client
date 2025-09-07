@@ -83,9 +83,7 @@ class MapViewer:
         exits_info = self.exits_with_zone_info([room[0] for room in rooms])
 
         self.draw_map(rooms, exits_info)
-
-        self.camera.apply_current_zoom()
-        print(f"Display Zone: Zone ID = {zone_id}, Level = {self.current_level}, Camera Zoom = {self.camera.zoom}")
+        print(f"Display Zone: Zone ID = {zone_id}, Level = {self.current_level}")
 
 
     def change_level(self, delta):
@@ -114,7 +112,10 @@ class MapViewer:
             from_pos = fetch_room_position(from_id)
             to_pos = fetch_room_position(to_id)
             if from_pos and to_pos:
-                dir_x, dir_y = calculate_direction(from_pos, to_pos)
+                # Extract x, y coordinates from position tuples
+                from_xy = (from_pos[0], from_pos[1])
+                to_xy = (to_pos[0], to_pos[1])
+                dir_x, dir_y = calculate_direction(from_xy, to_xy)
                 detailed_exits_info.append((from_id, to_id, to_zone_id, dir_x, dir_y))
             else:
                 print(f"Position not found for from_id: {from_id} or to_id: {to_id}")
@@ -162,7 +163,14 @@ class MapViewer:
         offset = room_size + shadow_offset + extra_padding
         min_x, min_y, max_x, max_y = float('inf'), float('inf'), float('-inf'), float('-inf')
 
+        # Draw exits first (behind rooms)
+        self.draw_exits(rooms, [exit[:2] for exit in exits_info])
+        
+        # Draw rooms on top
         for room_id, x, y, z, name in rooms:
+            # Handle None z-values as level 0
+            if z is None:
+                z = 0
             if z != self.current_level:
                 continue
             self.draw_room_with_shadow(x, y, str(room_id), name)
@@ -173,16 +181,22 @@ class MapViewer:
             count += 1
 
         self.drawn_bounds = (min_x, min_y, max_x, max_y)
-        self.draw_exits(rooms, [exit[:2] for exit in exits_info])
-
+        
+        # Draw zone change notes
         for exit_info in exits_info:
             from_id, to_id, to_zone_id, _, _ = exit_info
             if to_zone_id != self.displayed_zone_id:
                 to_zone_name = fetch_zone_name(to_zone_id)
                 from_room_position = fetch_room_position(from_id)
                 if from_room_position:
-                    x, y = from_room_position
+                    x = from_room_position[0]
+                    y = from_room_position[1]
                     self.place_zone_change_note(x, y, to_zone_name)
+        
+        # Auto-fit view to show all rooms - ensure this happens after drawing
+        if count > 0:
+            # Use after to ensure canvas is updated
+            self.this.after(50, lambda: self.center_view_on_bounds(min_x, min_y, max_x, max_y))
 
     def place_zone_change_note(self, x, y, zone_name):
         note_text = f"To {zone_name}"
@@ -215,13 +229,102 @@ class MapViewer:
             self.display_zone(zone_id)
 
     def unhighlight_room(self, room_id):
+        room_id = str(room_id)
         room_tag = f"{room_id}_room"
-        self.this.itemconfig(room_tag, fill=self.room_color)
+        if self.this.find_withtag(room_tag):
+            self.this.itemconfig(room_tag, fill=self.room_color)
+    
+    def update_position_indicator(self, room_id):
+        """Add a light grey circle around current position"""
+        # Remove old position indicator
+        self.this.delete("position_indicator")
+        
+        # Get room position from database
+        room_pos = fetch_room_position(int(room_id))
+        if room_pos:
+            x = room_pos[0]
+            y = room_pos[1]
+            
+            # Calculate radius based on current zoom to keep consistent screen size
+            # Base radius is 80 pixels on screen
+            screen_radius = 80
+            # Adjust for current zoom level (inverse relationship)
+            actual_radius = screen_radius / getattr(self.camera, 'zoom', 1.0) if hasattr(self, 'camera') else screen_radius
+            
+            self.this.create_oval(
+                x - actual_radius, y - actual_radius,
+                x + actual_radius, y + actual_radius,
+                fill="#F5F5F5",  # Very light grey
+                outline="#E8E8E8",  # Slightly darker outline
+                width=1,
+                tags=("position_indicator",)
+            )
+            
+            # Lower the indicator to be behind connections
+            self.this.tag_lower("position_indicator")
+            # Make sure connections stay above indicator but below rooms
+            self.this.tag_raise("connection", "position_indicator")
 
     def highlight_room(self, room_id):
-        if hasattr(self, 'current_highlight'):
+        # Ensure room_id is a string for tag matching
+        room_id = str(room_id)
+        
+        # Unhighlight previous room if different
+        if hasattr(self, 'current_highlight') and self.current_highlight != room_id:
             self.unhighlight_room(self.current_highlight)
+        
         self.current_highlight = room_id
-
+        self.current_room_id = room_id
+        
         room_tag = f"{room_id}_room"
-        self.this.itemconfig(room_tag, fill="#FF6EC7")
+        # Check if the room exists on canvas before trying to highlight
+        if self.this.find_withtag(room_tag):
+            self.this.itemconfig(room_tag, fill="#FF6EC7")
+            # Add position indicator circle
+            self.update_position_indicator(room_id)
+            print(f"[Map] Highlighted room {room_id}")
+            
+            # Ensure the entire map is visible after highlighting
+            if hasattr(self, 'drawn_bounds') and self.drawn_bounds:
+                min_x, min_y, max_x, max_y = self.drawn_bounds
+                self.this.after(100, lambda: self.center_view_on_bounds(min_x, min_y, max_x, max_y))
+        else:
+            print(f"[Map] Room {room_id} not found on current display")
+    
+    def center_view_on_bounds(self, min_x, min_y, max_x, max_y):
+        """Fit all rooms in the view"""
+        # Add padding
+        padding = 50
+        
+        # Update scroll region to include all content
+        self.this.config(scrollregion=(min_x - padding, min_y - padding, 
+                                       max_x + padding, max_y + padding))
+        
+        # Calculate center point
+        center_x = (min_x + max_x) / 2
+        center_y = (min_y + max_y) / 2
+        
+        # Get canvas dimensions
+        self.this.update_idletasks()
+        canvas_width = self.this.winfo_width()
+        canvas_height = self.this.winfo_height()
+        
+        if canvas_width > 1 and canvas_height > 1:
+            # Calculate the view area
+            content_width = max_x - min_x + 2 * padding
+            content_height = max_y - min_y + 2 * padding
+            
+            # Calculate scale to fit all content
+            if content_width > 0 and content_height > 0:
+                scale_x = canvas_width / content_width
+                scale_y = canvas_height / content_height
+                scale = min(scale_x, scale_y)
+                
+                # Apply zoom to fit all rooms
+                if scale != 1.0 and hasattr(self, 'camera'):
+                    self.camera.zoom = scale
+                    self.this.scale("all", center_x, center_y, scale, scale)
+            
+            # Reset view to top-left to show all content
+            self.this.xview_moveto(0)
+            self.this.yview_moveto(0)

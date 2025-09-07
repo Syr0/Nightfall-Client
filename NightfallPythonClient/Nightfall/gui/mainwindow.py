@@ -32,6 +32,8 @@ class MainWindow:
 
         self.auto_walker = AutoWalker(self.map_viewer)
         self.auto_walker.toggle_active()  # Always enable tracking
+        self.map_viewer.parent = self  # Set reference for callbacks
+        self.highlight_info = None  # Store current highlight information
         self.connection = MUDConnection(self.handle_message, self.on_login_success, self.on_login_prompt)
         self.connection.connect()
     def initialize_window(self):
@@ -80,8 +82,15 @@ class MainWindow:
             # Get password from input if it was just entered
             self.connection.save_credentials(self.entered_username, self.connection.password or '')
         
-        # Send look command to find position
-        self.root.after(500, lambda: self.connection.send('look'))
+        # Send look command after a longer delay to ensure login is complete
+        def send_look():
+            print("[Login] Sending automatic 'look' command")
+            self.awaiting_response_for_command = True
+            self.last_command = 'look'
+            self.connection.send('look')
+        
+        # Wait 2 seconds for login to fully complete
+        self.root.after(2000, send_look)
         
         # Execute initial commands if configured
         if self.config.has_option('InitialCommands', 'commands'):
@@ -133,6 +142,8 @@ class MainWindow:
         for code, color in self.ansi_colors.items():
             self.text_area.tag_configure(code, foreground=color)
         self.text_area.tag_configure('command', foreground=self.command_color)
+        # Create default highlight tag
+        self.text_area.tag_configure('highlight_default', foreground='#AAAAAA')
 
     def send_input(self, event):
         input_text = self.input_area.get().strip()
@@ -160,6 +171,7 @@ class MainWindow:
                 # Normal command mode
                 if any(cmd for cmd in self.trigger_commands if cmd.startswith(input_text.split()[0])):
                     self.awaiting_response_for_command = True
+                    self.last_command = input_text.split()[0]  # Store the command
                 self.connection.send(input_text)
                 self.text_area.config(state='normal')
                 self.text_area.insert(tk.END, f"> {input_text}\n", 'command')
@@ -174,6 +186,8 @@ class MainWindow:
         current_color = None
         buffer = ""
         i = 0
+        char_position = 0  # Track position without ANSI codes
+        
         while i < len(message):
             if i < len(message) - 1 and message[i] == '\x1b' and message[i + 1] == '[':
                 # Found ANSI escape sequence
@@ -185,28 +199,111 @@ class MainWindow:
                         if code == '0' or code == '':
                             # Reset
                             if buffer:
-                                self.append_to_buffer(buffer, current_color)
+                                self.append_to_buffer_with_highlight(buffer, current_color, char_position - len(buffer), char_position)
                                 buffer = ""
                             current_color = None
                         elif code in self.ansi_colors:
                             if buffer:
-                                self.append_to_buffer(buffer, current_color)
+                                self.append_to_buffer_with_highlight(buffer, current_color, char_position - len(buffer), char_position)
                                 buffer = ""
                             current_color = code
                     i = end_idx + 1
                 else:
                     buffer += message[i]
+                    char_position += 1
                     i += 1
             else:
                 buffer += message[i]
+                char_position += 1
                 i += 1
 
         if buffer:
-            self.append_to_buffer(buffer, current_color)
+            self.append_to_buffer_with_highlight(buffer, current_color, char_position - len(buffer), char_position)
         self.schedule_update()
 
     def append_to_buffer(self, text, color_tag=None):
         self.update_buffer.append((text, color_tag))
+    
+    def append_to_buffer_with_highlight(self, text, color_tag, start_pos, end_pos):
+        """Append text with potential highlighting based on match ranges"""
+        if self.highlight_info and self.highlight_info.get('ranges'):
+            # Check if this text segment overlaps with any highlight ranges
+            highlighted_parts = []
+            current_idx = 0
+            
+            for range_start, range_end in self.highlight_info['ranges']:
+                if range_end <= start_pos or range_start >= end_pos:
+                    continue  # No overlap
+                
+                # Calculate overlap
+                overlap_start = max(0, range_start - start_pos)
+                overlap_end = min(len(text), range_end - start_pos)
+                
+                if overlap_start > current_idx:
+                    # Add non-highlighted part before this range
+                    highlighted_parts.append((text[current_idx:overlap_start], color_tag, False))
+                
+                # Add highlighted part
+                highlighted_parts.append((text[overlap_start:overlap_end], color_tag, True))
+                current_idx = overlap_end
+            
+            # Add remaining non-highlighted text
+            if current_idx < len(text):
+                highlighted_parts.append((text[current_idx:], color_tag, False))
+            
+            # Add all parts to buffer
+            for part_text, part_color, is_highlighted in highlighted_parts:
+                if is_highlighted:
+                    # Use a lighter version of the color for highlighting
+                    highlight_tag = self._get_highlight_tag(part_color)
+                    self.update_buffer.append((part_text, highlight_tag))
+                else:
+                    self.update_buffer.append((part_text, part_color))
+        else:
+            # No highlighting, add normally
+            self.update_buffer.append((text, color_tag))
+    
+    def _get_highlight_tag(self, base_color):
+        """Get or create a lighter version of a color tag for highlighting"""
+        if not base_color:
+            return 'highlight_default'
+        
+        highlight_tag = f'highlight_{base_color}'
+        
+        # Create the highlight tag if it doesn't exist
+        if highlight_tag not in self.ansi_colors:
+            # Get base color or use white as default
+            base = self.ansi_colors.get(base_color, '#FFFFFF')
+            
+            # Make color lighter by blending with white
+            if base.startswith('#'):
+                r = int(base[1:3], 16)
+                g = int(base[3:5], 16)
+                b = int(base[5:7], 16)
+                
+                # Blend with white (increase each component by 30%)
+                r = min(255, r + int((255 - r) * 0.3))
+                g = min(255, g + int((255 - g) * 0.3))
+                b = min(255, b + int((255 - b) * 0.3))
+                
+                lighter = f'#{r:02x}{g:02x}{b:02x}'
+            else:
+                lighter = '#AAAAAA'  # Default light grey
+            
+            self.ansi_colors[highlight_tag] = lighter
+            # Configure the tag in text area
+            self.text_area.tag_configure(highlight_tag, foreground=lighter)
+        
+        return highlight_tag
+    
+    def apply_description_highlighting(self, highlight_info):
+        """Apply highlighting information from position finder"""
+        # Only apply if similarity is high enough (already filtered in positionfinder)
+        if highlight_info and highlight_info.get('similarity', 0) >= 0.9:
+            self.highlight_info = highlight_info
+            print(f"[Highlight] Applying highlight with {highlight_info['similarity']:.1%} similarity")
+        else:
+            self.highlight_info = None  # Clear highlighting for poor matches
 
     def schedule_update(self):
         if not self.update_pending:
@@ -226,10 +323,20 @@ class MainWindow:
         self.update_pending = False
 
     def handle_message(self, message):
+        # Store raw message for highlighting
+        self.last_message = message
         self.ANSI_Color_Text(message)
-        if self.awaiting_response_for_command:
-            self.auto_walker.analyze_response(message)
-            self.awaiting_response_for_command = False
+        # Always analyze for position if tracking is active
+        if self.awaiting_response_for_command and self.auto_walker.is_active():
+            # Check if this was a look command and message is long enough to be a room description
+            is_look = hasattr(self, 'last_command') and self.last_command in ['l', 'look']
+            # Only process if it's a real room description (not login messages)
+            if len(message) > 150 or 'There' in message and 'exit' in message:
+                # Give the response analyzer the full message for better matching
+                self.root.after(100, lambda: self.auto_walker.analyze_response(message, is_look))
+                self.awaiting_response_for_command = False
+            elif is_look:
+                print(f"[Position] Ignoring short response ({len(message)} chars) - not a room description")
 
     def setup_console_ui(self, console_frame):
         bg_color = self.config.get('Font', 'background_color', fallback='#000000')  # Black as fallback
