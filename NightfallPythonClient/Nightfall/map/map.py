@@ -62,10 +62,39 @@ class MapViewer:
 
 
     def initialize_ui(self):
-        zone_listbox_frame = ttk.Frame(self.pane, width=200)
-        self.zone_listbox = tk.Listbox(zone_listbox_frame, height=10)
+        # Use tk.Frame for theme support
+        zone_listbox_frame = tk.Frame(self.pane, width=200, bg=self.background_color)
+        
+        # Apply theme to listbox
+        listbox_bg = self.background_color
+        listbox_fg = "#FFFFFF" if self.background_color[1] < '5' else "#000000"  # Auto contrast
+        select_bg = self.player_marker_color if hasattr(self, 'player_marker_color') else "#0078D4"
+        
+        self.zone_listbox = tk.Listbox(
+            zone_listbox_frame, 
+            height=10,
+            bg=listbox_bg,
+            fg=listbox_fg,
+            selectbackground=select_bg,
+            selectforeground="#FFFFFF",
+            font=("Consolas", 10),
+            relief="flat",
+            bd=0,
+            highlightthickness=1,
+            highlightbackground=listbox_bg,
+            highlightcolor=select_bg
+        )
+        
+        # Add scrollbar with theme
+        scrollbar = tk.Scrollbar(zone_listbox_frame, bg=listbox_bg)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        self.zone_listbox.config(yscrollcommand=scrollbar.set)
+        scrollbar.config(command=self.zone_listbox.yview)
+        
         for zone_name in sorted(self.zone_dict.keys()):
             self.zone_listbox.insert(tk.END, zone_name)
+        
         self.zone_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.zone_listbox.bind('<<ListboxSelect>>', self.on_zone_select)
         self.pane.add(zone_listbox_frame, weight=1)
@@ -367,6 +396,20 @@ class MapViewer:
         
         # Update canvas background
         self.this.config(bg=self.background_color)
+        
+        # Update zone listbox with theme
+        if hasattr(self, 'zone_listbox'):
+            listbox_fg = "#FFFFFF" if self.background_color[1] < '5' else "#000000"
+            self.zone_listbox.config(
+                bg=self.background_color,
+                fg=listbox_fg,
+                selectbackground=self.player_marker_color,
+                highlightbackground=self.background_color,
+                highlightcolor=self.player_marker_color
+            )
+            # Update parent frame
+            if self.zone_listbox.master:
+                self.zone_listbox.master.config(bg=self.background_color)
     
     def on_right_click(self, event):
         """Handle right-click on map"""
