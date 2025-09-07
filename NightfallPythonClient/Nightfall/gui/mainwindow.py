@@ -5,6 +5,7 @@ from network.connection import MUDConnection
 from config.settings import load_config
 from map.map import MapViewer
 from core.positionfinder import AutoWalker
+from gui.themes import ThemeManager
 
 class MainWindow:
     def __init__(self, root):
@@ -20,9 +21,10 @@ class MainWindow:
         self.entered_username = None
 
         self.config = load_config()
+        self.theme_manager = ThemeManager()
         self.load_ansi_colors()
 
-        self.command_color = self.config.get('ANSIColors', 'OwnCommandsColor', fallback='#FFA500')
+        self.command_color = self.theme_manager.get_theme()['ansi_colors'].get('command', '#FFA500')
 
         self.initialize_window()
         self.load_trigger_commands()
@@ -37,8 +39,12 @@ class MainWindow:
         self.connection = MUDConnection(self.handle_message, self.on_login_success, self.on_login_prompt)
         self.connection.connect()
     def initialize_window(self):
-        self.root.title("MUD Client with map")
-        self.root.geometry("1200x600")
+        self.root.title("Nightfall MUD Client")
+        self.root.geometry("1400x800")
+        # Apply theme to root window
+        theme = self.theme_manager.get_theme()
+        if 'console' in theme:
+            self.root.configure(bg=theme['console']['bg'])
 
     def load_trigger_commands(self):
         commands_str = self.config.get('TriggerCommands', 'commands',
@@ -50,12 +56,15 @@ class MainWindow:
         pane = ttk.PanedWindow(self.root, orient=tk.HORIZONTAL)
         pane.pack(fill=tk.BOTH, expand=True)
 
-        console_frame = ttk.Frame(pane, width=400)
+        # Use tk.Frame instead of ttk.Frame for theme support
+        console_frame = tk.Frame(pane, width=400)
         self.setup_console_ui(console_frame)
         pane.add(console_frame, weight=1)
 
-        map_frame = ttk.Frame(pane, width=600)
-        self.map_viewer = MapViewer(map_frame, pane, self.root)
+        # Use tk.Frame for map as well
+        theme = self.theme_manager.get_theme()
+        map_frame = tk.Frame(pane, width=600, bg=theme['map']['bg'])
+        self.map_viewer = MapViewer(map_frame, pane, self.root, self.theme_manager)
         pane.add(map_frame, weight=2)
         self.map_viewer.this.pack(fill=tk.BOTH, expand=True)
 
@@ -114,30 +123,13 @@ class MainWindow:
         self.input_area.focus_set()
 
     def load_ansi_colors(self):
-        # Standard ANSI color codes
-        self.ansi_colors = {
-            '30': '#000000',  # Black
-            '31': '#CC0000',  # Red
-            '32': '#00CC00',  # Green  
-            '33': '#CCCC00',  # Yellow
-            '34': '#0000CC',  # Blue
-            '35': '#CC00CC',  # Magenta
-            '36': '#00CCCC',  # Cyan
-            '37': '#CCCCCC',  # White
-            '90': '#555555',  # Bright Black
-            '91': '#FF0000',  # Bright Red
-            '92': '#00FF00',  # Bright Green
-            '93': '#FFFF00',  # Bright Yellow
-            '94': '#0000FF',  # Bright Blue
-            '95': '#FF00FF',  # Bright Magenta
-            '96': '#00FFFF',  # Bright Cyan
-            '97': '#FFFFFF',  # Bright White
-        }
-        # Add custom colors from config
-        if self.config.has_section('ANSIColors'):
-            for code, color in self.config['ANSIColors'].items():
-                if code != 'owncommandscolor':
-                    self.ansi_colors[code] = color
+        # Get ANSI colors from theme
+        theme = self.theme_manager.get_theme()
+        self.ansi_colors = theme['ansi_colors'].copy()
+        
+        # Remove non-ANSI entries
+        if 'command' in self.ansi_colors:
+            del self.ansi_colors['command']
     def create_color_tags(self):
         for code, color in self.ansi_colors.items():
             self.text_area.tag_configure(code, foreground=color)
@@ -339,15 +331,22 @@ class MainWindow:
                 print(f"[Position] Ignoring short response ({len(message)} chars) - not a room description")
 
     def setup_console_ui(self, console_frame):
-        bg_color = self.config.get('Font', 'background_color', fallback='#000000')  # Black as fallback
-        font_color = self.config.get('Font', 'color', fallback='#FFFFFF')  # White as fallback
-        # Use Consolas font for better Unicode/box-drawing support
-        self.text_area = tk.Text(console_frame, wrap=tk.WORD, state='disabled', 
-                                bg=bg_color, fg=font_color, font=('Consolas', 10))
-        self.text_area.pack(fill=tk.BOTH, expand=True, side=tk.TOP)
+        theme = self.theme_manager.get_theme()
+        
+        # Create styled frame
+        console_frame.configure(bg=theme['console']['bg'])
+        
+        # Create text area with theme
+        self.text_area = tk.Text(console_frame, wrap=tk.WORD, state='disabled')
+        self.theme_manager.apply_theme_to_widget(self.text_area, 'console')
+        self.text_area.pack(fill=tk.BOTH, expand=True, side=tk.TOP, padx=2, pady=2)
+        
         self.create_color_tags()
-        self.input_area = tk.Entry(console_frame, font=('Consolas', 10))
-        self.input_area.pack(fill=tk.X, side=tk.BOTTOM)
+        
+        # Create input area with theme
+        self.input_area = tk.Entry(console_frame)
+        self.theme_manager.apply_theme_to_widget(self.input_area, 'input')
+        self.input_area.pack(fill=tk.X, side=tk.BOTTOM, padx=5, pady=5)
         self.input_area.bind("<Return>", self.send_input)
         self.text_area.bind("<1>", lambda event: self.input_area.focus())
         self.text_area.bind("<Control-c>", self.copy_text)
@@ -360,14 +359,34 @@ class MainWindow:
         self.zone_listbox.bind('<<ListboxSelect>>', self.map_viewer.on_zone_select)
 
     def setup_toolbar(self):
-        bg_color = self.config.get('Visuals', 'BackgroundColor', fallback='white')
-        self.toolbar = tk.Frame(self.map_viewer.this.master, bd=1, relief=tk.RAISED, bg=bg_color)
+        theme = self.theme_manager.get_theme()['toolbar']
+        self.toolbar = tk.Frame(self.map_viewer.this.master, bd=0, bg=theme['bg'])
 
-        # Only level controls, tracking is always on
-        self.level_up_btn = tk.Button(self.toolbar, text="Level Up", command=self.level_up, width=10, height=1)
-        self.level_up_btn.pack(side=tk.LEFT, padx=2, pady=2)
-        self.level_down_btn = tk.Button(self.toolbar, text="Level Down", command=self.level_down, width=10, height=1)
-        self.level_down_btn.pack(side=tk.LEFT, padx=2, pady=2)
+        # Style buttons
+        button_style = {
+            'bg': theme['button_bg'],
+            'fg': theme['button_fg'],
+            'activebackground': theme['button_active'],
+            'activeforeground': theme['fg'],
+            'relief': theme['relief'],
+            'bd': 1,
+            'font': ('Segoe UI', 10),
+            'cursor': 'hand2'
+        }
+        
+        # Level controls
+        self.level_up_btn = tk.Button(self.toolbar, text="▲ Level Up", command=self.level_up, width=12, **button_style)
+        self.level_up_btn.pack(side=tk.LEFT, padx=3, pady=5)
+        self.level_down_btn = tk.Button(self.toolbar, text="▼ Level Down", command=self.level_down, width=12, **button_style)
+        self.level_down_btn.pack(side=tk.LEFT, padx=3, pady=5)
+        
+        # Add theme switcher
+        tk.Label(self.toolbar, text="Theme:", bg=theme['bg'], fg=theme['fg'], font=('Segoe UI', 10)).pack(side=tk.RIGHT, padx=5)
+        self.theme_selector = ttk.Combobox(self.toolbar, values=[name for _, name in self.theme_manager.get_theme_names()], 
+                                          width=15, state='readonly')
+        self.theme_selector.set(self.theme_manager.get_theme()['name'])
+        self.theme_selector.pack(side=tk.RIGHT, padx=5, pady=5)
+        self.theme_selector.bind('<<ComboboxSelected>>', self.change_theme)
 
         self.toolbar.pack(side=tk.TOP, fill=tk.X, before=self.map_viewer.this)
 
@@ -391,6 +410,49 @@ class MainWindow:
             self.input_area.insert(0, command)
         return "break"
 
+    def change_theme(self, event):
+        """Change the application theme"""
+        selected = self.theme_selector.get()
+        for key, name in self.theme_manager.get_theme_names():
+            if name == selected:
+                self.theme_manager.set_theme(key)
+                # Refresh UI with new theme
+                self.apply_theme()
+                break
+    
+    def apply_theme(self):
+        """Apply current theme to all UI elements"""
+        theme = self.theme_manager.get_theme()
+        
+        # Update console
+        self.theme_manager.apply_theme_to_widget(self.text_area, 'console')
+        self.theme_manager.apply_theme_to_widget(self.input_area, 'input')
+        
+        # Update toolbar
+        toolbar_theme = theme['toolbar']
+        self.toolbar.config(bg=toolbar_theme['bg'])
+        
+        button_style = {
+            'bg': toolbar_theme['button_bg'],
+            'fg': toolbar_theme['button_fg'],
+            'activebackground': toolbar_theme['button_active'],
+            'activeforeground': toolbar_theme['fg'],
+        }
+        
+        self.level_up_btn.config(**button_style)
+        self.level_down_btn.config(**button_style)
+        
+        # Update ANSI colors
+        self.load_ansi_colors()
+        self.create_color_tags()
+        
+        # Update map if exists
+        if hasattr(self, 'map_viewer'):
+            self.map_viewer.apply_theme(theme['map'])
+            # Redraw current zone
+            if self.map_viewer.displayed_zone_id:
+                self.map_viewer.display_zone(self.map_viewer.displayed_zone_id)
+    
     def cycle_command_history_down(self, event):
         if self.command_history:
             self.command_history_index -= 1

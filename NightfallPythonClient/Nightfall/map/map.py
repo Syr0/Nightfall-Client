@@ -19,10 +19,11 @@ def calculate_direction(from_pos, to_pos):
     return dir_x / mag, dir_y / mag
 
 class MapViewer:
-    def __init__(self, parent, pane, root):
+    def __init__(self, parent, pane, root, theme_manager=None):
         self.parent = parent
         self.pane = pane
         self.root = root
+        self.theme_manager = theme_manager
         self.current_room_id = None
         self.displayed_zone_id = None
         self.global_view_state = None
@@ -30,8 +31,15 @@ class MapViewer:
         self.scale = 1.0
         self.levels_dict = {}
         self.load_config()
+        
+        # Apply theme if available
+        if self.theme_manager:
+            theme = self.theme_manager.get_theme()['map']
+            self.background_color = theme['bg']
+            self.room_color = theme['room_color']
+            self.note_color = theme['zone_note_color']
 
-        self.this = tk.Canvas(self.parent, bg=self.background_color)
+        self.this = tk.Canvas(self.parent, bg=self.background_color, highlightthickness=0)
         self.this.pack(fill=tk.BOTH, expand=True)
         self.camera = map.camera.Camera(self.this)
         
@@ -67,6 +75,7 @@ class MapViewer:
         config = configparser.ConfigParser()
         config.read(config_file_path)
 
+        # Load defaults from config
         self.player_marker_color = config['Visuals']['PlayerMarkerColor']
         self.background_color = config['Visuals']['BackgroundColor']
         self.room_distance = int(config['Visuals']['RoomDistance'])
@@ -74,6 +83,17 @@ class MapViewer:
         self.directed_graph = config.getboolean('Visuals', 'DirectedGraph')
         self.default_zone = config['General']['DefaultZone']
         self.note_color = config['Visuals'].get('ZoneLeavingColor', '#FFA500')
+        
+        # Override with theme if available
+        if hasattr(self, 'theme_manager') and self.theme_manager:
+            theme = self.theme_manager.get_theme()['map']
+            self.background_color = theme['bg']
+            self.room_color = theme['room_color']
+            self.note_color = theme['zone_note_color']
+            self.player_marker_color = theme['room_highlight']
+            self.connection_color = theme.get('connection_color', '#808080')
+            self.position_indicator_fill = theme.get('position_indicator', '#F5F5F520')
+            self.position_indicator_outline = theme.get('position_outline', '#E8E8E840')
 
     def fetch_zone_dict(self):
         zones = fetch_zones()
@@ -136,13 +156,15 @@ class MapViewer:
         shadow_offset = 6
         tag_id = str(room_id)
 
+        # Shadow with theme-aware color
         shadow_tag = f"{tag_id}_shadow"
+        shadow_color = "#202020" if hasattr(self, 'background_color') and self.background_color[1] < '5' else "gray80"
         self.create_rounded_rectangle(x - box_size + shadow_offset, y - box_size + shadow_offset,
                                       x + box_size + shadow_offset, y + box_size + shadow_offset, radius=10,
-                                      fill="gray20", tags=(shadow_tag,))
+                                      fill=shadow_color, tags=(shadow_tag,))
         room_tag = f"{tag_id}_room"
         
-        # Check for custom color
+        # Check for custom color, otherwise use theme color
         custom = self.room_customization.get_room_customization(room_id)
         room_fill_color = custom.get('color', self.room_color)
         
@@ -151,8 +173,10 @@ class MapViewer:
         
         # Add custom note indicator if note exists
         if custom.get('note'):
+            # Use N instead of emoji for better compatibility
             note_indicator = self.this.create_text(x + box_size - 5, y - box_size + 5, 
-                                                  text="📝", font=('Arial', 8), 
+                                                  text="N", font=('Arial', 8, 'bold'), 
+                                                  fill=self.note_color,
                                                   tags=(f"{tag_id}_note",))
         
         self.this.tag_bind(room_tag, "<Enter>", lambda e, id=room_id: self.show_room_name(e, id, e.x, e.y))
@@ -170,10 +194,11 @@ class MapViewer:
             from_pos = next((room[1:3] for room in rooms if room[0] == from_id), None)
             to_pos = next((room[1:3] for room in rooms if room[0] == to_id), None)
             if from_pos and to_pos:
+                line_color = getattr(self, 'connection_color', self.room_color)
                 if (from_id, to_id) in bidirectional:
-                    self.this.create_line(from_pos[0], from_pos[1], to_pos[0], to_pos[1], fill=self.room_color)
+                    self.this.create_line(from_pos[0], from_pos[1], to_pos[0], to_pos[1], fill=line_color, width=2)
                 else:
-                    self.this.create_line(from_pos[0], from_pos[1], to_pos[0], to_pos[1], arrow=tk.LAST,fill=self.room_color)
+                    self.this.create_line(from_pos[0], from_pos[1], to_pos[0], to_pos[1], arrow=tk.LAST, fill=line_color, width=2)
     def draw_map(self, rooms, exits_info):
         total_x, total_y, count = 0, 0, 0
         room_size = 20
@@ -284,12 +309,17 @@ class MapViewer:
             # Adjust for current zoom level (inverse relationship)
             actual_radius = screen_radius / getattr(self.camera, 'zoom', 1.0) if hasattr(self, 'camera') else screen_radius
             
+            # Use theme colors if available (use stipple for transparency effect)
+            fill_color = getattr(self, 'position_indicator_fill', '#F5F5F5')
+            outline_color = getattr(self, 'position_indicator_outline', '#E8E8E8')
+            
             self.this.create_oval(
                 x - actual_radius, y - actual_radius,
                 x + actual_radius, y + actual_radius,
-                fill="#F5F5F5",  # Very light grey
-                outline="#E8E8E8",  # Slightly darker outline
-                width=1,
+                fill=fill_color,
+                outline=outline_color,
+                width=2,
+                stipple='gray25',  # Creates transparency effect
                 tags=("position_indicator",)
             )
             
@@ -312,7 +342,8 @@ class MapViewer:
         room_tag = f"{room_id}_room"
         # Check if the room exists on canvas before trying to highlight
         if self.this.find_withtag(room_tag):
-            self.this.itemconfig(room_tag, fill="#FF6EC7")
+            highlight_color = getattr(self, 'player_marker_color', '#FF6EC7')
+            self.this.itemconfig(room_tag, fill=highlight_color)
             # Add position indicator circle
             self.update_position_indicator(room_id)
             print(f"[Map] Highlighted room {room_id}")
@@ -323,6 +354,19 @@ class MapViewer:
                 self.this.after(100, lambda: self.center_view_on_bounds(min_x, min_y, max_x, max_y))
         else:
             print(f"[Map] Room {room_id} not found on current display")
+    
+    def apply_theme(self, map_theme):
+        """Apply a theme to the map"""
+        self.background_color = map_theme['bg']
+        self.room_color = map_theme['room_color']
+        self.note_color = map_theme['zone_note_color']
+        self.player_marker_color = map_theme['room_highlight']
+        self.connection_color = map_theme.get('connection_color', '#808080')
+        self.position_indicator_fill = map_theme.get('position_indicator', '#F5F5F520')
+        self.position_indicator_outline = map_theme.get('position_outline', '#E8E8E840')
+        
+        # Update canvas background
+        self.this.config(bg=self.background_color)
     
     def on_right_click(self, event):
         """Handle right-click on map"""
