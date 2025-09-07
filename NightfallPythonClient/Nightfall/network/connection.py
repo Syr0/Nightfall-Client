@@ -1,21 +1,22 @@
-#conneciton.py
+#connection.py
 import socket
 from threading import Thread
-from config.settings import load_config
+from config.settings import load_config, save_config
 
 class MUDConnection:
-    def __init__(self, on_message=None, on_login_success=None):
-        config = load_config()
-        self.host = config.get('Network', 'host')
-        self.port = config.getint('Network', 'port')
-        self.quit_command = config.get('Network', 'quit_command')
-        self.user = config.get('Credentials', 'USER')
-        self.password = config.get('Credentials', 'PASS')
+    def __init__(self, on_message=None, on_login_success=None, on_login_prompt=None):
+        self.config = load_config()
+        self.host = self.config.get('Network', 'host')
+        self.port = self.config.getint('Network', 'port')
+        self.quit_command = self.config.get('Network', 'quit_command')
+        self.user = self.config.get('Credentials', 'User', fallback='')
+        self.password = self.config.get('Credentials', 'Pass', fallback='')
         self.on_message = on_message
         self.on_login_success = on_login_success
+        self.on_login_prompt = on_login_prompt
         self.socket = None
         self.connected = False
-        self.login_attempted = False
+        self.login_state = 'waiting'  # 'waiting', 'username', 'password', 'logged_in'
 
     def connect(self):
         self.socket = socket.socket(socket.AF_INET, socket.SOCK_STREAM)
@@ -30,17 +31,41 @@ class MUDConnection:
     def receive_data(self):
         try:
             while self.connected:
-                data = self.socket.recv(4096).decode('utf-8', errors='replace')
-                if data and self.on_message:
-                    self.on_message(data)
-                if not self.login_attempted and "Enter your name," in data:
-                    self.login_attempted = True
-                    self.send(self.user)
-                    self.send(self.password)
-                success_message = load_config().get('Login', 'success_message')
-                if success_message in data:
-                    if self.on_login_success:
-                        self.on_login_success()
+                raw_data = self.socket.recv(4096)
+                # Use CP437 encoding for proper box-drawing characters
+                try:
+                    data = raw_data.decode('cp437')
+                except UnicodeDecodeError:
+                    data = raw_data.decode('utf-8', errors='replace')
+                
+                if data:
+                    # Check for login prompts
+                    if self.login_state == 'waiting' and "Enter your name," in data:
+                        if self.user:  # Auto-login if credentials exist
+                            self.send(self.user)
+                            self.login_state = 'password_next'
+                        else:  # Manual login
+                            self.login_state = 'username'
+                            if self.on_login_prompt:
+                                self.on_login_prompt('username')
+                    elif self.login_state == 'password_next' and "password:" in data.lower():
+                        if self.password:
+                            self.send(self.password)
+                            self.login_state = 'checking'
+                        else:
+                            self.login_state = 'password'
+                            if self.on_login_prompt:
+                                self.on_login_prompt('password')
+                    elif self.login_state in ['checking', 'password']:
+                        # Check for successful login indicators
+                        if any(indicator in data for indicator in ['Welcome', 'Mana:', 'HP:', 'Last login']):
+                            self.login_state = 'logged_in'
+                            if self.on_login_success:
+                                self.on_login_success()
+                    
+                    # Always pass message to handler
+                    if self.on_message:
+                        self.on_message(data)
         except Exception as e:
             print(f"Connection error: {e}")
             self.connected = False
@@ -49,3 +74,10 @@ class MUDConnection:
             self.send(self.quit_command)
             self.socket.close()
             self.connected = False
+    
+    def save_credentials(self, username, password):
+        """Save login credentials to config"""
+        self.config.set('Credentials', 'User', username)
+        self.config.set('Credentials', 'Pass', password)
+        config_dict = {section: dict(self.config[section]) for section in self.config.sections()}
+        save_config(config_dict)

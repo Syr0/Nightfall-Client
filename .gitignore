@@ -2,3 +2,5 @@
 NightfallPythonClient/Nightfall/config/settings.ini
 NightfallPythonClient/Nightfall/core/__pycache__
 /NightfallPythonClient/Nightfall/gui/__pycache__
+*.pyc
+NightfallPythonClient/Nightfall/CLAUDE.md

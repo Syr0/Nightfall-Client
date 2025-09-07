@@ -16,6 +16,8 @@ class MainWindow:
         self.command_history_index = -1
         self.awaiting_response_for_command = False
         self.ansi_colors = {}
+        self.login_mode = None  # 'username' or 'password'
+        self.entered_username = None
 
         self.config = load_config()
         self.load_ansi_colors()
@@ -29,7 +31,8 @@ class MainWindow:
         self.setup_toolbar()
 
         self.auto_walker = AutoWalker(self.map_viewer)
-        self.connection = MUDConnection(self.handle_message, self.on_login_success)
+        self.auto_walker.toggle_active()  # Always enable tracking
+        self.connection = MUDConnection(self.handle_message, self.on_login_success, self.on_login_prompt)
         self.connection.connect()
     def initialize_window(self):
         self.root.title("MUD Client with map")
@@ -66,15 +69,66 @@ class MainWindow:
             pass
 
     def on_login_success(self):
-        initial_commands = self.config.get('InitialCommands', 'commands').split(',')
-        for command in initial_commands:
-            self.connection.send(command.strip())
+        self.login_mode = None
+        self.text_area.config(state='normal')
+        self.text_area.insert(tk.END, "\n[Login successful]\n", 'command')
+        self.text_area.config(state='disabled')
+        self.text_area.see(tk.END)
+        
+        # Save credentials if they were entered manually
+        if self.entered_username and not self.connection.user:
+            # Get password from input if it was just entered
+            self.connection.save_credentials(self.entered_username, self.connection.password or '')
+        
+        # Send look command to find position
+        self.root.after(500, lambda: self.connection.send('look'))
+        
+        # Execute initial commands if configured
+        if self.config.has_option('InitialCommands', 'commands'):
+            commands = self.config.get('InitialCommands', 'commands').split(',')
+            for cmd in commands:
+                if cmd.strip():
+                    self.connection.send(cmd.strip())
+    
+    def on_login_prompt(self, prompt_type):
+        """Handle login prompts from the connection"""
+        self.login_mode = prompt_type
+        if prompt_type == 'username':
+            self.text_area.config(state='normal')
+            self.text_area.insert(tk.END, "\n[Enter username]\n", 'command')
+            self.text_area.config(state='disabled')
+        elif prompt_type == 'password':
+            self.text_area.config(state='normal')
+            self.text_area.insert(tk.END, "\n[Enter password]\n", 'command')
+            self.text_area.config(state='disabled')
+        self.text_area.see(tk.END)
+        self.input_area.focus_set()
 
     def load_ansi_colors(self):
-        self.ansi_colors = {}
+        # Standard ANSI color codes
+        self.ansi_colors = {
+            '30': '#000000',  # Black
+            '31': '#CC0000',  # Red
+            '32': '#00CC00',  # Green  
+            '33': '#CCCC00',  # Yellow
+            '34': '#0000CC',  # Blue
+            '35': '#CC00CC',  # Magenta
+            '36': '#00CCCC',  # Cyan
+            '37': '#CCCCCC',  # White
+            '90': '#555555',  # Bright Black
+            '91': '#FF0000',  # Bright Red
+            '92': '#00FF00',  # Bright Green
+            '93': '#FFFF00',  # Bright Yellow
+            '94': '#0000FF',  # Bright Blue
+            '95': '#FF00FF',  # Bright Magenta
+            '96': '#00FFFF',  # Bright Cyan
+            '97': '#FFFFFF',  # Bright White
+        }
+        # Add custom colors from config
         if self.config.has_section('ANSIColors'):
             for code, color in self.config['ANSIColors'].items():
-                self.ansi_colors[code] = color
+                if code != 'owncommandscolor':
+                    self.ansi_colors[code] = color
     def create_color_tags(self):
         for code, color in self.ansi_colors.items():
             self.text_area.tag_configure(code, foreground=color)
@@ -83,16 +137,37 @@ class MainWindow:
     def send_input(self, event):
         input_text = self.input_area.get().strip()
         if input_text:
-            if any(cmd for cmd in self.trigger_commands if cmd.startswith(input_text.split()[0])):
-                self.awaiting_response_for_command = True
-            self.connection.send(input_text)
-
-            self.text_area.config(state='normal')
-            self.text_area.insert(tk.END, f"> {input_text}\n", 'command')
-            self.text_area.config(state='disabled')
+            # Handle login mode
+            if self.login_mode == 'username':
+                self.entered_username = input_text
+                self.connection.user = input_text
+                self.connection.send(input_text)
+                self.connection.login_state = 'password_next'
+                self.text_area.config(state='normal')
+                self.text_area.insert(tk.END, f"> {input_text}\n", 'command')
+                self.text_area.config(state='disabled')
+            elif self.login_mode == 'password':
+                self.connection.password = input_text
+                self.connection.send(input_text)
+                self.connection.login_state = 'checking'
+                self.text_area.config(state='normal')
+                self.text_area.insert(tk.END, "> ***\n", 'command')  # Hide password
+                self.text_area.config(state='disabled')
+                # Save credentials after entering them
+                if self.entered_username:
+                    self.connection.save_credentials(self.entered_username, input_text)
+            else:
+                # Normal command mode
+                if any(cmd for cmd in self.trigger_commands if cmd.startswith(input_text.split()[0])):
+                    self.awaiting_response_for_command = True
+                self.connection.send(input_text)
+                self.text_area.config(state='normal')
+                self.text_area.insert(tk.END, f"> {input_text}\n", 'command')
+                self.text_area.config(state='disabled')
+                self.command_history.append(input_text)
+                self.command_history_index = -1
+            
             self.text_area.see(tk.END)
-            self.command_history.append(input_text)
-            self.command_history_index = -1
         self.input_area.delete(0, tk.END)
 
     def ANSI_Color_Text(self, message):
@@ -100,23 +175,31 @@ class MainWindow:
         buffer = ""
         i = 0
         while i < len(message):
-            if message[i] == '\x1b' and message[i + 1:i + 2] == '[':
+            if i < len(message) - 1 and message[i] == '\x1b' and message[i + 1] == '[':
+                # Found ANSI escape sequence
                 end_idx = message.find('m', i)
-                color_code = message[i + 2:end_idx]
-                if color_code == '0':
-                    if buffer:
-                        self.append_to_buffer(buffer, current_color)
-                        buffer = ""
-                    current_color = None
-                elif color_code in self.ansi_colors:
-                    if buffer:
-                        self.append_to_buffer(buffer, current_color)
-                        buffer = ""
-                    current_color = color_code
-                i = end_idx
+                if end_idx != -1:
+                    # Parse color codes (can be multiple separated by semicolons)
+                    codes = message[i + 2:end_idx].split(';')
+                    for code in codes:
+                        if code == '0' or code == '':
+                            # Reset
+                            if buffer:
+                                self.append_to_buffer(buffer, current_color)
+                                buffer = ""
+                            current_color = None
+                        elif code in self.ansi_colors:
+                            if buffer:
+                                self.append_to_buffer(buffer, current_color)
+                                buffer = ""
+                            current_color = code
+                    i = end_idx + 1
+                else:
+                    buffer += message[i]
+                    i += 1
             else:
                 buffer += message[i]
-            i += 1
+                i += 1
 
         if buffer:
             self.append_to_buffer(buffer, current_color)
@@ -151,10 +234,12 @@ class MainWindow:
     def setup_console_ui(self, console_frame):
         bg_color = self.config.get('Font', 'background_color', fallback='#000000')  # Black as fallback
         font_color = self.config.get('Font', 'color', fallback='#FFFFFF')  # White as fallback
-        self.text_area = tk.Text(console_frame, wrap=tk.WORD, state='disabled', bg=bg_color, fg=font_color)
+        # Use Consolas font for better Unicode/box-drawing support
+        self.text_area = tk.Text(console_frame, wrap=tk.WORD, state='disabled', 
+                                bg=bg_color, fg=font_color, font=('Consolas', 10))
         self.text_area.pack(fill=tk.BOTH, expand=True, side=tk.TOP)
         self.create_color_tags()
-        self.input_area = tk.Entry(console_frame)
+        self.input_area = tk.Entry(console_frame, font=('Consolas', 10))
         self.input_area.pack(fill=tk.X, side=tk.BOTTOM)
         self.input_area.bind("<Return>", self.send_input)
         self.text_area.bind("<1>", lambda event: self.input_area.focus())
@@ -171,9 +256,7 @@ class MainWindow:
         bg_color = self.config.get('Visuals', 'BackgroundColor', fallback='white')
         self.toolbar = tk.Frame(self.map_viewer.this.master, bd=1, relief=tk.RAISED, bg=bg_color)
 
-        self.update_pos_toggle_btn = tk.Button(self.toolbar, text="Enable Tracking", bg="lightgrey",
-                                               command=self.toggle_update_position, width=15, height=1)
-        self.update_pos_toggle_btn.pack(side=tk.LEFT, padx=2, pady=2)
+        # Only level controls, tracking is always on
         self.level_up_btn = tk.Button(self.toolbar, text="Level Up", command=self.level_up, width=10, height=1)
         self.level_up_btn.pack(side=tk.LEFT, padx=2, pady=2)
         self.level_down_btn = tk.Button(self.toolbar, text="Level Down", command=self.level_down, width=10, height=1)
@@ -187,14 +270,7 @@ class MainWindow:
     def level_down(self):
         self.map_viewer.change_level(-1)
 
-    def toggle_update_position(self):
-        self.update_position_active = not self.update_position_active
-        self.auto_walker.toggle_active()
-        if self.auto_walker.is_active():
-            self.update_pos_toggle_btn.config(bg="green")
-            self.connection.send(self.room_reload_command)
-        else:
-            self.update_pos_toggle_btn.config(bg="lightgrey")
+    # Tracking is always on, no toggle needed
 
     def cycle_command_history_up(self, event):
         if self.command_history:
