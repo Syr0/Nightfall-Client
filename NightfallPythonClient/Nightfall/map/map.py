@@ -8,6 +8,7 @@ from core.database import fetch_rooms, fetch_zones, fetch_exits_with_zone_info, 
     fetch_zone_name
 import map.camera
 from gui.tooltip import ToolTip
+from map.room_customization import RoomCustomization, RoomCustomizationDialog
 
 def calculate_direction(from_pos, to_pos):
     dir_x = to_pos[0] - from_pos[0]
@@ -33,6 +34,9 @@ class MapViewer:
         self.this = tk.Canvas(self.parent, bg=self.background_color)
         self.this.pack(fill=tk.BOTH, expand=True)
         self.camera = map.camera.Camera(self.this)
+        
+        # Initialize room customization manager
+        self.room_customization = RoomCustomization()
 
         self.level_var = tk.StringVar()
         self.level_var.set(f"Level: {self.current_level}")
@@ -42,6 +46,9 @@ class MapViewer:
         self.zone_dict = self.fetch_zone_dict()
         self.initialize_ui()
         self.tooltips = {}
+        
+        # Bind right-click for room customization
+        self.this.bind("<Button-3>", self.on_right_click)
 
         self.global_view_state = self.capture_current_view()
 
@@ -134,8 +141,20 @@ class MapViewer:
                                       x + box_size + shadow_offset, y + box_size + shadow_offset, radius=10,
                                       fill="gray20", tags=(shadow_tag,))
         room_tag = f"{tag_id}_room"
+        
+        # Check for custom color
+        custom = self.room_customization.get_room_customization(room_id)
+        room_fill_color = custom.get('color', self.room_color)
+        
         self.create_rounded_rectangle(x - box_size, y - box_size, x + box_size, y + box_size, radius=10,
-                                      fill=self.room_color, tags=(room_tag,))
+                                      fill=room_fill_color, tags=(room_tag,))
+        
+        # Add custom note indicator if note exists
+        if custom.get('note'):
+            note_indicator = self.this.create_text(x + box_size - 5, y - box_size + 5, 
+                                                  text="📝", font=('Arial', 8), 
+                                                  tags=(f"{tag_id}_note",))
+        
         self.this.tag_bind(room_tag, "<Enter>", lambda e, id=room_id: self.show_room_name(e, id, e.x, e.y))
         self.this.tag_bind(room_tag, "<Leave>", self.hide_room_name)
 
@@ -205,6 +224,12 @@ class MapViewer:
 
     def show_room_name(self, event, room_id, event_x, event_y):
         room_name = fetch_room_name(room_id)
+        
+        # Add custom note to tooltip if exists
+        custom = self.room_customization.get_room_customization(room_id)
+        if custom.get('note'):
+            room_name = f"{room_name}\n\nNote: {custom['note']}"
+        
         if room_id not in self.tooltips:
             self.tooltips[room_id] = ToolTip(self.this)
         self.tooltips[room_id].show_tip(room_name, event_x, event_y)
@@ -212,7 +237,12 @@ class MapViewer:
 
     def update_tooltip_position(self, event, room_id, event_x, event_y):
         if room_id in self.tooltips:
-            self.tooltips[room_id].show_tip(fetch_room_name(room_id), event_x, event_y)
+            room_name = fetch_room_name(room_id)
+            # Add custom note to tooltip if exists
+            custom = self.room_customization.get_room_customization(room_id)
+            if custom.get('note'):
+                room_name = f"{room_name}\n\nNote: {custom['note']}"
+            self.tooltips[room_id].show_tip(room_name, event_x, event_y)
 
     def hide_room_name(self, event):
         for tooltip in self.tooltips.values():
@@ -232,7 +262,10 @@ class MapViewer:
         room_id = str(room_id)
         room_tag = f"{room_id}_room"
         if self.this.find_withtag(room_tag):
-            self.this.itemconfig(room_tag, fill=self.room_color)
+            # Check for custom color when unhighlighting
+            custom = self.room_customization.get_room_customization(room_id)
+            fill_color = custom.get('color', self.room_color)
+            self.this.itemconfig(room_tag, fill=fill_color)
     
     def update_position_indicator(self, room_id):
         """Add a light grey circle around current position"""
@@ -290,6 +323,64 @@ class MapViewer:
                 self.this.after(100, lambda: self.center_view_on_bounds(min_x, min_y, max_x, max_y))
         else:
             print(f"[Map] Room {room_id} not found on current display")
+    
+    def on_right_click(self, event):
+        """Handle right-click on map"""
+        # Convert canvas coordinates to actual coordinates
+        canvas_x = self.this.canvasx(event.x)
+        canvas_y = self.this.canvasy(event.y)
+        
+        # Find the closest item at click position
+        clicked_item = self.this.find_closest(canvas_x, canvas_y)
+        if clicked_item:
+            # Get all tags for the clicked item
+            tags = self.this.gettags(clicked_item)
+            
+            # Look for room tag
+            room_id = None
+            for tag in tags:
+                if tag.endswith('_room'):
+                    room_id = tag.replace('_room', '')
+                    break
+            
+            if room_id:
+                self.show_room_customization_dialog(room_id)
+    
+    def show_room_customization_dialog(self, room_id):
+        """Show dialog for customizing room"""
+        # Get current customization
+        current = self.room_customization.get_room_customization(room_id)
+        current_note = current.get('note', '')
+        current_color = current.get('color', None)
+        
+        # Show dialog
+        dialog = RoomCustomizationDialog(
+            self.this,
+            room_id,
+            current_note,
+            current_color
+        )
+        
+        result = dialog.show()
+        
+        if result is not None:
+            # Save customization
+            success = self.room_customization.set_room_customization(
+                room_id,
+                note=result['note'],
+                color=result['color']
+            )
+            
+            if success:
+                print(f"[Customization] Saved customization for room {room_id}")
+                # Refresh the current zone to show changes
+                if self.displayed_zone_id:
+                    self.display_zone(self.displayed_zone_id)
+                    # Re-highlight current room if needed
+                    if hasattr(self, 'current_room_id') and self.current_room_id:
+                        self.highlight_room(self.current_room_id)
+            else:
+                print(f"[Customization] Failed to save customization for room {room_id}")
     
     def center_view_on_bounds(self, min_x, min_y, max_x, max_y):
         """Fit all rooms in the view"""
