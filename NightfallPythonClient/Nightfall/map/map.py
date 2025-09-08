@@ -26,9 +26,7 @@ class MapViewer:
         self.theme_manager = theme_manager
         self.current_room_id = None
         self.displayed_zone_id = None
-        self.global_view_state = None
         self.current_level = 0
-        self.scale = 1.0
         self.levels_dict = {}
         self.has_found_position = False
         self.last_zone_id = None
@@ -60,8 +58,14 @@ class MapViewer:
         # Bind right-click for room customization
         self.this.bind("<Button-3>", self.on_right_click)
         self.this.bind("<Double-Button-1>", self.on_double_click)
+        # Bind ESC to stop autowalk
+        self.this.bind("<Escape>", lambda e: self.stop_autowalk())
+        # Bind Ctrl+F for room search
+        self.this.bind("<Control-f>", lambda e: self.show_room_search_dialog())
+        # Focus canvas to receive keyboard events
+        self.this.focus_set()
 
-        self.global_view_state = self.capture_current_view()
+        # Camera handles all view state now
 
 
     def initialize_ui(self):
@@ -100,7 +104,12 @@ class MapViewer:
         
         self.zone_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.zone_listbox.bind('<<ListboxSelect>>', self.on_zone_select)
+        # Add keyboard navigation for zone list
+        self.zone_listbox.bind('<KeyPress>', self.on_zone_list_keypress)
         self.pane.add(zone_listbox_frame, weight=1)
+        
+        # Store sorted zone names for quick access
+        self.sorted_zone_names = sorted(self.zone_dict.keys())
 
     def load_config(self):
         config_file_path = os.path.join(os.path.dirname(__file__), '../config/settings.ini')
@@ -144,35 +153,141 @@ class MapViewer:
         return {zone[1]: zone[0] for zone in zones}
 
     def initialize_level_ui(self):
-        self.level_frame = tk.Frame(self.this)
+        self.level_frame = tk.Frame(self.parent)
         self.level_frame.pack(side=tk.TOP, fill=tk.X)
+        
+        # Get theme colors
+        if self.theme_manager:
+            theme = self.theme_manager.get_theme()
+            bg_color = theme.get('bg', self.background_color)
+            fg_color = theme.get('fg', '#FFFFFF')
+            button_bg = theme.get('button_bg', bg_color)
+            button_fg = theme.get('button_fg', fg_color)
+            hover_color = theme.get('map', {}).get('room_highlight', '#FF6EC7')
+        else:
+            bg_color = self.background_color
+            fg_color = '#FFFFFF' if bg_color[1] < '5' else '#000000'
+            button_bg = bg_color
+            button_fg = fg_color
+            hover_color = '#FF6EC7'
+        
+        # Create toolbar frame with theme
+        toolbar = tk.Frame(self.level_frame, height=35, bg=bg_color)
+        toolbar.pack(side=tk.TOP, fill=tk.X, pady=2)
+        
+        # Level label with theme
+        level_label = tk.Label(toolbar, textvariable=self.level_var, bg=bg_color, fg=fg_color, font=('Consolas', 10))
+        level_label.pack(side=tk.LEFT, padx=10)
+        
+        # Up button (icon only) with theme
+        up_btn = tk.Button(toolbar, text="⬆", command=lambda: self.change_level(1), 
+                          width=3, bg=button_bg, fg=button_fg, relief="flat", 
+                          font=('Arial', 12), cursor="hand2")
+        up_btn.pack(side=tk.LEFT, padx=2)
+        
+        # Down button (icon only) with theme
+        down_btn = tk.Button(toolbar, text="⬇", command=lambda: self.change_level(-1), 
+                            width=3, bg=button_bg, fg=button_fg, relief="flat",
+                            font=('Arial', 12), cursor="hand2")
+        down_btn.pack(side=tk.LEFT, padx=2)
+        
+        # Manual position finding button - circle with crosshair
+        find_btn = tk.Canvas(toolbar, width=30, height=30, highlightthickness=0, bg=bg_color)
+        find_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Draw circle with theme color
+        find_btn.create_oval(5, 5, 25, 25, outline=fg_color, width=2)
+        # Draw crosshair
+        find_btn.create_line(15, 9, 15, 21, fill=fg_color, width=1)
+        find_btn.create_line(9, 15, 21, 15, fill=fg_color, width=1)
+        
+        # Bind click to manual position finding
+        find_btn.bind("<Button-1>", lambda e: self.manual_find_position())
+        
+        # Player location button - center on current room
+        location_btn = tk.Canvas(toolbar, width=30, height=30, highlightthickness=0, bg=bg_color)
+        location_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Draw location pin icon
+        location_btn.create_oval(10, 8, 20, 18, fill=hover_color, outline=fg_color, width=1)
+        location_btn.create_polygon(15, 18, 11, 25, 15, 22, 19, 25, fill=hover_color, outline=fg_color, width=1)
+        location_btn.create_oval(13, 11, 17, 15, fill=bg_color, outline="")
+        
+        # Bind click to center on player
+        def center_on_player(e=None):
+            if hasattr(self, 'current_highlight') and self.current_highlight:
+                self.center_on_room(self.current_highlight)
+        location_btn.bind("<Button-1>", center_on_player)
+        
+        # Search button
+        search_btn = tk.Canvas(toolbar, width=30, height=30, highlightthickness=0, bg=bg_color)
+        search_btn.pack(side=tk.LEFT, padx=5)
+        
+        # Draw magnifying glass icon
+        search_btn.create_oval(8, 8, 18, 18, outline=fg_color, width=2)
+        search_btn.create_line(16, 16, 22, 22, fill=fg_color, width=2)
+        
+        # Bind click to search
+        search_btn.bind("<Button-1>", lambda e: self.show_room_search_dialog())
+        
+        # Add hover effects for all canvas buttons
+        def add_hover(canvas, redraw_func):
+            def on_enter(e):
+                canvas.delete("all")
+                redraw_func(hover_color, "hover")
+            def on_leave(e):
+                canvas.delete("all")
+                redraw_func(fg_color, "normal")
+            canvas.bind("<Enter>", on_enter)
+            canvas.bind("<Leave>", on_leave)
+        
+        # Hover for find button
+        def redraw_find(color, state):
+            find_btn.create_oval(5, 5, 25, 25, outline=color, width=2, tags=state)
+            find_btn.create_line(15, 9, 15, 21, fill=color, width=1, tags=state)
+            find_btn.create_line(9, 15, 21, 15, fill=color, width=1, tags=state)
+        add_hover(find_btn, redraw_find)
+        
+        # Hover for location button
+        def redraw_location(color, state):
+            fill_color = hover_color if state == "hover" else hover_color
+            location_btn.create_oval(10, 8, 20, 18, fill=fill_color, outline=color, width=1, tags=state)
+            location_btn.create_polygon(15, 18, 11, 25, 15, 22, 19, 25, fill=fill_color, outline=color, width=1, tags=state)
+            location_btn.create_oval(13, 11, 17, 15, fill=bg_color, outline="", tags=state)
+        add_hover(location_btn, redraw_location)
+        
+        # Hover for search button
+        def redraw_search(color, state):
+            search_btn.create_oval(8, 8, 18, 18, outline=color, width=2, tags=state)
+            search_btn.create_line(16, 16, 22, 22, fill=color, width=2, tags=state)
+        add_hover(search_btn, redraw_search)
 
-    def display_zone(self, zone_id):
+    def display_zone(self, zone_id, auto_fit=True):
         self.displayed_zone_id = zone_id
         self.this.delete("all")
         rooms = fetch_rooms(zone_id, z=self.current_level)
         exits_info = self.exits_with_zone_info([room[0] for room in rooms])
 
         self.draw_map(rooms, exits_info)
+        # Fit all rooms in view after drawing (unless disabled)
+        if auto_fit:
+            self.this.after(100, self.camera.fit_to_content)
 
 
     def change_level(self, delta):
         new_level = self.current_level + delta
         self.current_level = new_level
-        self.display_zone(self.displayed_zone_id)
-        # Always fit the map when changing levels
-        self.this.after(100, self.fit_and_center)
-
-
-    def capture_current_view(self):
-        bbox = self.this.bbox("all")
-        if bbox is None:
-            return (0, 0, 1.0, 0, 0, 100, 100)
-        else:
-            x1, y1, x2, y2 = bbox
-            scroll_x = self.this.xview()[0]
-            scroll_y = self.this.yview()[0]
-            return (scroll_x, scroll_y, self.scale, x1, y1, x2, y2)
+        self.level_var.set(f"Level: {self.current_level}")
+        # Display zone with auto-fit to show all rooms at new level
+        self.display_zone(self.displayed_zone_id)  # Will auto-fit by default
+    
+    def manual_find_position(self):
+        """Manually trigger position finding by sending 'l' command"""
+        if hasattr(self, 'parent') and hasattr(self.parent, 'connection'):
+            print("[MAP] Manual position finding - sending 'l' command")
+            self.parent.awaiting_response_for_command = True
+            self.parent.last_command = 'l'
+            self.parent.connection.send('l')
 
     def exits_with_zone_info(self, from_obj_ids):
         exits_info = fetch_exits_with_zone_info(from_obj_ids)
@@ -279,14 +394,18 @@ class MapViewer:
                     y = from_room_position[1]
                     self.place_zone_change_note(x, y, to_zone_name)
         
-        # Auto-fit view to show all rooms - ensure this happens after drawing
+        # Store bounds for reference
         if count > 0:
-            # Use after to ensure canvas is updated
-            self.this.after(50, lambda: self.center_view_on_bounds(min_x, min_y, max_x, max_y))
+            self.drawn_bounds = (min_x, min_y, max_x, max_y)
+            # Camera will handle fitting in display_zone
 
     def place_zone_change_note(self, x, y, zone_name):
         note_text = f"To {zone_name}"
-        self.this.create_text(x, y - 20, text=note_text, fill=self.note_color, font=('Helvetica', '10', 'bold'))
+        # Add zone_note tag to enable double-click functionality
+        zone_id = self.zone_dict.get(zone_name)
+        tags = ("zone_note", f"zone_{zone_id}") if zone_id else ("zone_note",)
+        self.this.create_text(x, y - 20, text=note_text, fill=self.note_color, 
+                              font=('Helvetica', '10', 'bold'), tags=tags)
 
 
     def show_room_name(self, event, room_id, event_x, event_y):
@@ -323,9 +442,139 @@ class MapViewer:
             zone_name = event.widget.get(index)
             zone_id = self.zone_dict[zone_name]
             self.current_level = 0
-            self.display_zone(zone_id)
-            # Always fit the map when changing zones manually
-            self.this.after(100, self.fit_and_center)
+            self.level_var.set(f"Level: {self.current_level}")
+            self.display_zone(zone_id)  # Will auto-fit by default
+            # No need for extra fit_map_to_view since display_zone handles it
+    
+    def on_zone_list_keypress(self, event):
+        """Handle keyboard navigation in zone list"""
+        if not event.char or not event.char.isalpha():
+            return
+        
+        # Find first zone starting with typed letter
+        target_char = event.char.upper()
+        for i, zone_name in enumerate(self.sorted_zone_names):
+            if zone_name.upper().startswith(target_char):
+                # Select and show the zone
+                self.zone_listbox.selection_clear(0, tk.END)
+                self.zone_listbox.selection_set(i)
+                self.zone_listbox.see(i)
+                self.zone_listbox.event_generate('<<ListboxSelect>>')
+                break
+    
+    def show_room_search_dialog(self):
+        """Show dialog to search for rooms by description"""
+        import tkinter.simpledialog as simpledialog
+        from core.fast_database import get_database
+        
+        # Create search dialog
+        search_text = simpledialog.askstring(
+            "Search Rooms",
+            "Enter text to search in room descriptions:",
+            parent=self.this
+        )
+        
+        if not search_text:
+            return
+        
+        # Search in database
+        db = get_database()
+        search_lower = search_text.lower()
+        matches = []
+        
+        # Search through all room descriptions
+        for room_id, description in db.data["descriptions_index"]:
+            if description and search_lower in description.lower():
+                room = db.get_room(room_id)
+                if room:
+                    room_name = room.get("name", "Unknown")
+                    zone_id = room.get("zone_id")
+                    zone_name = db.get_zone_name(zone_id) if zone_id else "Unknown Zone"
+                    matches.append((room_id, room_name, zone_name, description[:100]))
+        
+        if not matches:
+            import tkinter.messagebox as messagebox
+            messagebox.showinfo("Search Results", f"No rooms found containing '{search_text}'")
+            return
+        
+        # Show results in a new window
+        self.show_search_results(matches, search_text)
+    
+    def show_search_results(self, matches, search_text):
+        """Display search results in a window"""
+        # Create results window
+        results_window = tk.Toplevel(self.root)
+        results_window.title(f"Search Results: '{search_text}'")
+        results_window.geometry("600x400")
+        
+        # Apply theme if available
+        if self.theme_manager:
+            theme = self.theme_manager.get_theme()
+            bg_color = theme.get('bg', self.background_color)
+            fg_color = theme.get('fg', '#FFFFFF')
+            results_window.configure(bg=bg_color)
+        else:
+            bg_color = self.background_color
+            fg_color = '#FFFFFF' if bg_color[1] < '5' else '#000000'
+        
+        # Create frame with scrollbar
+        frame = tk.Frame(results_window, bg=bg_color)
+        frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Create listbox for results
+        listbox = tk.Listbox(
+            frame,
+            bg=bg_color,
+            fg=fg_color,
+            selectbackground=self.player_marker_color,
+            selectforeground='#FFFFFF',
+            font=('Consolas', 10),
+            height=20
+        )
+        
+        scrollbar = tk.Scrollbar(frame, bg=bg_color)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        listbox.config(yscrollcommand=scrollbar.set)
+        scrollbar.config(command=listbox.yview)
+        
+        # Add results to listbox
+        room_data = []
+        for room_id, room_name, zone_name, desc_preview in matches:
+            display_text = f"[{zone_name}] {room_name} - {desc_preview}..."
+            listbox.insert(tk.END, display_text)
+            room_data.append((room_id, zone_name))
+        
+        listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Add info label
+        info_label = tk.Label(
+            results_window,
+            text=f"Found {len(matches)} rooms. Double-click to go to room.",
+            bg=bg_color,
+            fg=fg_color
+        )
+        info_label.pack(pady=5)
+        
+        # Handle double-click to go to room
+        def on_result_double_click(event):
+            selection = listbox.curselection()
+            if selection:
+                index = selection[0]
+                room_id, zone_name = room_data[index]
+                
+                # Get zone_id from zone_name
+                zone_id = self.zone_dict.get(zone_name)
+                if zone_id:
+                    # Display the zone and highlight the room
+                    self.current_level = 0
+                    self.display_zone(zone_id)
+                    self.this.after(100, lambda: self.highlight_room(str(room_id)))
+                    self.this.after(200, lambda: self.center_on_room(str(room_id)))
+                
+                # Close the search window
+                results_window.destroy()
+        
+        listbox.bind('<Double-Button-1>', on_result_double_click)
 
     def unhighlight_room(self, room_id):
         room_id = str(room_id)
@@ -402,7 +651,8 @@ class MapViewer:
             from core.database import fetch_room_zone_id
             zone_id = fetch_room_zone_id(room_id)
             if zone_id:
-                self.display_zone(zone_id)
+                # Don't auto-fit when displaying zone from position tracking
+                self.display_zone(zone_id, auto_fit=False)
         
         room_tag = f"{room_id}_room"
         # Check if the room exists on canvas before trying to highlight
@@ -411,15 +661,10 @@ class MapViewer:
             self.this.itemconfig(room_tag, fill=highlight_color)
             self.update_position_indicator(room_id)
             
-            # Only auto-fit once per zone
-            zone_changed = (self.displayed_zone_id != self.last_zone_id)
-            first_position = not self.has_found_position
-            
-            if first_position or zone_changed:
-                # Delay to ensure everything is drawn
-                self.this.after(100, self.fit_and_center)
-                self.has_found_position = True
-                self.last_zone_id = self.displayed_zone_id
+            # Don't auto-fit when highlighting - let manual zone selection control fitting
+            # Mark that we've found a position
+            self.has_found_position = True
+            self.last_zone_id = self.displayed_zone_id
     
     def apply_theme(self, map_theme):
         """Apply a theme to the map"""
@@ -481,32 +726,73 @@ class MapViewer:
                 self.zone_listbox.master.config(bg=self.background_color)
     
     def on_double_click(self, event):
-        clicked_item = self.this.find_overlapping(event.x, event.y, event.x, event.y)
-        for item in clicked_item:
+        # Convert event coordinates to canvas coordinates
+        canvas_x = self.this.canvasx(event.x)
+        canvas_y = self.this.canvasy(event.y)
+        clicked_items = self.this.find_overlapping(canvas_x, canvas_y, canvas_x, canvas_y)
+        
+        for item in clicked_items:
             tags = self.this.gettags(item)
+            
+            # Check for zone note first (higher priority)
+            for tag in tags:
+                if tag.startswith("zone_"):
+                    try:
+                        zone_id = int(tag.replace("zone_", ""))
+                        # Open the clicked zone
+                        self.current_level = 0  # Reset to level 0 when changing zones
+                        self.level_var.set(f"Level: {self.current_level}")
+                        self.display_zone(zone_id)  # Will auto-fit by default
+                        return
+                    except ValueError:
+                        pass
+            
+            # Then check for room click (pathfinding)
             for tag in tags:
                 if tag.endswith("_room"):
-                    target_room_id = int(tag.replace("_room", ""))
-                    self.pathfind_to_room(target_room_id)
-                    return
+                    try:
+                        target_room_id = int(tag.replace("_room", ""))
+                        self.pathfind_to_room(target_room_id)
+                        return
+                    except ValueError:
+                        pass
     
     def pathfind_to_room(self, target_room_id):
         if not hasattr(self, 'current_room_id') or not self.current_room_id:
             return
         
         current = int(self.current_room_id)
-        target = target_room_id
+        target = int(target_room_id)
         
         if current == target:
             return
         
-        path = self.find_path(current, target)
-        if path:
-            self.execute_path(path)
+        # Store the target for recalculation after each step
+        self.autowalk_target = target
+        print(f"[PATHFIND] Setting autowalk target to room {target}")
+        
+        # Start the autowalk process
+        self.send_next_walk_command()
     
     def find_path(self, start, end):
         from collections import deque
         from core.fast_database import get_database
+        
+        # Map exit types to direction commands
+        EXIT_TYPE_TO_COMMAND = {
+            0: "n",    # north
+            1: "ne",   # northeast  
+            2: "e",    # east
+            3: "se",   # southeast
+            4: "s",    # south
+            5: "sw",   # southwest
+            6: "w",    # west
+            7: "nw",   # northwest
+            8: "u",    # up
+            9: "d",    # down
+            10: "enter", # enter
+            11: "leave"  # leave
+        }
         
         db = get_database()
         queue = deque([(start, [])])
@@ -523,16 +809,70 @@ class MapViewer:
                 next_room = exit_info["to"]
                 if next_room not in visited:
                     visited.add(next_room)
-                    direction = exit_info.get("command") or exit_info.get("type", "unknown")
+                    # Get command from mapping or use custom command if specified
+                    if exit_info.get("command"):
+                        direction = exit_info["command"]
+                    else:
+                        exit_type = exit_info.get("type", -1)
+                        direction = EXIT_TYPE_TO_COMMAND.get(exit_type, f"unknown_{exit_type}")
                     new_path = path + [direction]
                     queue.append((next_room, new_path))
         
         return None
     
     def execute_path(self, path):
+        # Deprecated - we now recalculate path after each step
+        # This is kept for backward compatibility but not used
+        pass
+    
+    def send_next_walk_command(self):
+        # Check if we have a target
+        if not hasattr(self, 'autowalk_target') or not self.autowalk_target:
+            return
+        
+        # Check current position
+        if not hasattr(self, 'current_room_id') or not self.current_room_id:
+            print("[AUTO-WALK] Lost position, stopping")
+            self.autowalk_target = None
+            return
+        
+        current = int(self.current_room_id)
+        target = self.autowalk_target
+        
+        # Check if we've reached the target
+        if current == target:
+            print(f"[AUTO-WALK] Reached target room {target}")
+            self.autowalk_target = None
+            return
+        
+        # Recalculate path from current position
+        print(f"[AUTO-WALK] Recalculating path from {current} to {target}")
+        path = self.find_path(current, target)
+        
+        if not path:
+            print(f"[AUTO-WALK] No path found from {current} to {target}")
+            self.autowalk_target = None
+            return
+        
         if hasattr(self, 'parent') and hasattr(self.parent, 'connection'):
-            for command in path:
-                self.parent.connection.send(command)
+            # Take the first step of the recalculated path
+            command = path[0]
+            print(f"[AUTO-WALK] Next step: {command} (total path: {len(path)} steps)")
+            
+            # Send the command
+            self.parent.awaiting_response_for_command = True
+            self.parent.last_command = command
+            self.parent.connection.send(command)
+            
+            # Schedule next recalculation after room update
+            # Increased delay to ensure position update completes
+            self.this.after(1000, self.send_next_walk_command)
+    
+    def stop_autowalk(self):
+        """Stop the current autowalk"""
+        if hasattr(self, 'autowalk_target'):
+            print(f"[AUTO-WALK] Stopped (was heading to room {self.autowalk_target})")
+            self.autowalk_target = None
     
     def on_right_click(self, event):
         """Handle right-click on map"""
@@ -592,69 +932,15 @@ class MapViewer:
                 pass
     
     def center_view_on_bounds(self, min_x, min_y, max_x, max_y):
-        """Just update scroll region - don't mess with zoom or position"""
-        # Set scroll region
-        padding = 1000
-        self.this.config(scrollregion=(min_x - padding, min_y - padding, 
-                                       max_x + padding, max_y + padding))
+        """Deprecated - camera handles this automatically"""
+        pass
     
-    def fit_and_center(self):
-        """Fit entire map in view AND center on current player position"""
-        # Get actual content bounds
-        bbox = self.this.bbox("all")
-        if not bbox:
-            return
-            
-        # Get canvas size
-        self.this.update_idletasks()
-        canvas_width = self.this.winfo_width()
-        canvas_height = self.this.winfo_height()
-        
-        if canvas_width <= 1 or canvas_height <= 1:
-            # Try again after a short delay if canvas not ready
-            self.this.after(100, self.fit_and_center)
-            return
-        
-        # Calculate content dimensions
-        content_width = bbox[2] - bbox[0]
-        content_height = bbox[3] - bbox[1]
-        
-        if content_width > 0 and content_height > 0:
-            # Calculate scale to fit all content
-            scale_x = (canvas_width * 0.95) / content_width
-            scale_y = (canvas_height * 0.95) / content_height
-            scale = min(scale_x, scale_y)
-            
-            # Center point for scaling
-            center_x = (bbox[0] + bbox[2]) / 2
-            center_y = (bbox[1] + bbox[3]) / 2
-            
-            # Reset any previous scaling
-            self.this.scale("all", center_x, center_y, 1/self.camera.zoom, 1/self.camera.zoom)
-            
-            # Apply new scale from center
-            self.this.scale("all", center_x, center_y, scale, scale)
-            self.camera.zoom = scale
-            
-            # Move content to center of canvas
-            new_bbox = self.this.bbox("all")
-            if new_bbox:
-                # Calculate offset to center the map
-                offset_x = (canvas_width - (new_bbox[2] - new_bbox[0])) / 2 - new_bbox[0]
-                offset_y = (canvas_height - (new_bbox[3] - new_bbox[1])) / 2 - new_bbox[1]
-                
-                # Move all items to center
-                self.this.move("all", offset_x, offset_y)
-        
-        # Update scroll region after centering
-        final_bbox = self.this.bbox("all")
-        if final_bbox:
-            padding = 2000
-            self.this.config(scrollregion=(final_bbox[0]-padding, final_bbox[1]-padding, 
-                                          final_bbox[2]+padding, final_bbox[3]+padding))
+    def fit_map_to_view(self):
+        """Let camera handle fitting content to view"""
+        self.camera.fit_to_content()
     
     def center_on_room(self, room_id):
-        """Center the view on a specific room"""
+        """Center the view on a specific room using camera"""
         room_tag = f"{room_id}_room"
         room_coords = self.this.bbox(room_tag)
         
@@ -663,29 +949,5 @@ class MapViewer:
             room_x = (room_coords[0] + room_coords[2]) / 2
             room_y = (room_coords[1] + room_coords[3]) / 2
             
-            # Get canvas dimensions
-            canvas_width = self.this.winfo_width()
-            canvas_height = self.this.winfo_height()
-            
-            # Get scroll region
-            scroll_region = self.this.cget('scrollregion').split()
-            if len(scroll_region) == 4:
-                scroll_x1 = float(scroll_region[0])
-                scroll_y1 = float(scroll_region[1])
-                scroll_x2 = float(scroll_region[2])
-                scroll_y2 = float(scroll_region[3])
-                scroll_width = scroll_x2 - scroll_x1
-                scroll_height = scroll_y2 - scroll_y1
-                
-                # Calculate scroll positions to center the room
-                if scroll_width > 0 and scroll_height > 0:
-                    x_fraction = (room_x - scroll_x1 - canvas_width/2) / (scroll_width - canvas_width)
-                    y_fraction = (room_y - scroll_y1 - canvas_height/2) / (scroll_height - canvas_height)
-                    
-                    # Clamp to valid range
-                    x_fraction = max(0, min(1, x_fraction))
-                    y_fraction = max(0, min(1, y_fraction))
-                    
-                    # Apply scroll
-                    self.this.xview_moveto(x_fraction)
-                    self.this.yview_moveto(y_fraction)
+            # Let camera handle centering
+            self.camera.center_on_point(room_x, room_y)

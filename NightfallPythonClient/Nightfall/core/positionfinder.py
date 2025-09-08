@@ -28,12 +28,20 @@ class AutoWalker:
         
         # Update display and highlight
         def update_display():
-            # Update z-level if different
-            if z_level != self.map_viewer.current_level:
-                self.map_viewer.current_level = z_level
+            # Check if we're changing zones
+            zone_changing = new_zone_id and (new_zone_id != self.map_viewer.displayed_zone_id or self.map_viewer.displayed_zone_id is None)
             
-            if new_zone_id and (new_zone_id != self.map_viewer.displayed_zone_id or self.map_viewer.displayed_zone_id is None):
+            # Update level first (important for zone changes)
+            if z_level != self.map_viewer.current_level or zone_changing:
+                self.map_viewer.current_level = z_level
+                self.map_viewer.level_var.set(f"Level: {z_level}")
+            
+            # Display new zone or redisplay current zone if level changed
+            if zone_changing:
                 self.map_viewer.display_zone(new_zone_id)
+            elif z_level != self.map_viewer.current_level and self.map_viewer.displayed_zone_id:
+                # Level changed within same zone
+                self.map_viewer.display_zone(self.map_viewer.displayed_zone_id)
             
             # Ensure room is highlighted after display update
             self.map_viewer.root.after(200, lambda: self.map_viewer.highlight_room(room_id))

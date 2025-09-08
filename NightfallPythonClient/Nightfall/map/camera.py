@@ -42,3 +42,110 @@ class Camera:
 
     def log_current_position(self):
         pass
+    
+    def center_on_point(self, x, y):
+        """Center the view on a specific point"""
+        # Get canvas dimensions
+        canvas_width = self.canvas.winfo_width()
+        canvas_height = self.canvas.winfo_height()
+        
+        if canvas_width <= 1 or canvas_height <= 1:
+            # Canvas not ready, try again
+            self.canvas.after(50, lambda: self.center_on_point(x, y))
+            return
+        
+        # Get current bbox to check scroll region
+        bbox = self.canvas.bbox("all")
+        if not bbox:
+            return
+            
+        # Calculate offset to center the point
+        canvas_center_x = canvas_width / 2
+        canvas_center_y = canvas_height / 2
+        
+        # Calculate how much to move everything
+        dx = canvas_center_x - x
+        dy = canvas_center_y - y
+        
+        # Move all items
+        self.canvas.move("all", dx, dy)
+        
+        # Update scroll region after moving
+        self.update_scroll_region()
+        
+        # Update position tracking
+        self.position = (x, y)
+    
+    def fit_to_content(self, padding=50):
+        """Fit all content in view with proper zoom and centering"""
+        bbox = self.canvas.bbox("all")
+        if not bbox:
+            return
+        
+        # Get canvas size
+        self.canvas.update_idletasks()
+        canvas_width = self.canvas.winfo_width()
+        canvas_height = self.canvas.winfo_height()
+        
+        if canvas_width <= 1 or canvas_height <= 1:
+            # Canvas not ready, try again
+            self.canvas.after(50, lambda: self.fit_to_content(padding))
+            return
+        
+        # Content bounds
+        x1, y1, x2, y2 = bbox
+        content_width = x2 - x1
+        content_height = y2 - y1
+        
+        if content_width <= 0 or content_height <= 0:
+            return
+        
+        # Reset to zoom 1.0 first to get accurate measurements
+        if self.zoom != 1.0:
+            self.canvas.scale("all", 0, 0, 1/self.zoom, 1/self.zoom)
+            self.zoom = 1.0
+        
+        # Calculate zoom needed to fit content with padding
+        scale_x = (canvas_width - padding * 2) / content_width
+        scale_y = (canvas_height - padding * 2) / content_height
+        new_zoom = min(scale_x, scale_y, 2.0)  # Cap at 2.0 to avoid too much zoom
+        
+        # Apply zoom from origin (0,0)
+        if new_zoom != 1.0:
+            self.canvas.scale("all", 0, 0, new_zoom, new_zoom)
+            self.zoom = new_zoom
+        
+        # Get new bbox after scaling
+        new_bbox = self.canvas.bbox("all")
+        if new_bbox:
+            # Calculate offset to center content
+            content_center_x = (new_bbox[0] + new_bbox[2]) / 2
+            content_center_y = (new_bbox[1] + new_bbox[3]) / 2
+            canvas_center_x = canvas_width / 2
+            canvas_center_y = canvas_height / 2
+            
+            # Move to center
+            offset_x = canvas_center_x - content_center_x
+            offset_y = canvas_center_y - content_center_y
+            self.canvas.move("all", offset_x, offset_y)
+        
+        # Update scroll region with extra space for panning
+        final_bbox = self.canvas.bbox("all")
+        if final_bbox:
+            extra = 2000  # Extra space for panning
+            self.canvas.configure(scrollregion=(
+                final_bbox[0] - extra,
+                final_bbox[1] - extra,
+                final_bbox[2] + extra,
+                final_bbox[3] + extra
+            ))
+    
+    def reset_view(self):
+        """Reset zoom and position"""
+        # Reset zoom
+        self.canvas.scale("all", 0, 0, 1/self.zoom, 1/self.zoom)
+        self.zoom = 1.0
+        
+        # Reset position
+        self.position = (0, 0)
+        self.update_scroll_region()
