@@ -140,11 +140,6 @@ class MapViewer:
 
         self.draw_map(rooms, exits_info)
         print(f"Display Zone: Zone ID = {zone_id}, Level = {self.current_level}")
-        
-        # Update scroll region but don't auto-zoom
-        if hasattr(self, 'drawn_bounds') and self.drawn_bounds:
-            min_x, min_y, max_x, max_y = self.drawn_bounds
-            self.center_view_on_bounds(min_x, min_y, max_x, max_y)
 
 
     def change_level(self, delta):
@@ -381,6 +376,9 @@ class MapViewer:
             # Add position indicator circle
             self.update_position_indicator(room_id)
             print(f"[Map] Highlighted room {room_id}")
+            
+            # NOW fit the map and center on player
+            self.fit_and_center()
         else:
             print(f"[Map] Room {room_id} not found on current display")
     
@@ -475,3 +473,66 @@ class MapViewer:
         padding = 1000
         self.this.config(scrollregion=(min_x - padding, min_y - padding, 
                                        max_x + padding, max_y + padding))
+    
+    def fit_and_center(self):
+        """Fit entire map in view AND center on current player position"""
+        # Get actual content bounds
+        bbox = self.this.bbox("all")
+        if not bbox:
+            return
+            
+        # Get canvas size
+        self.this.update_idletasks()
+        canvas_width = self.this.winfo_width()
+        canvas_height = self.this.winfo_height()
+        
+        if canvas_width <= 1 or canvas_height <= 1:
+            return
+        
+        # Calculate scale to fit all content
+        content_width = bbox[2] - bbox[0]
+        content_height = bbox[3] - bbox[1]
+        
+        if content_width > 0 and content_height > 0:
+            scale_x = canvas_width / content_width
+            scale_y = canvas_height / content_height
+            scale = min(scale_x, scale_y) * 0.95  # 95% to have margin
+            
+            # Only scale if we need to zoom out
+            if scale < 1:
+                # Reset any previous scale
+                if hasattr(self, 'last_scale'):
+                    self.this.scale("all", 0, 0, 1/self.last_scale, 1/self.last_scale)
+                
+                # Apply new scale
+                self.this.scale("all", 0, 0, scale, scale)
+                self.last_scale = scale
+                
+                # Update camera zoom
+                if hasattr(self, 'camera'):
+                    self.camera.zoom = scale
+        
+        # Set scroll region
+        new_bbox = self.this.bbox("all")
+        if new_bbox:
+            padding = 500
+            self.this.config(scrollregion=(new_bbox[0]-padding, new_bbox[1]-padding, 
+                                          new_bbox[2]+padding, new_bbox[3]+padding))
+            
+            # Center on player position if we have one
+            if hasattr(self, 'current_room_id') and self.current_room_id:
+                room_pos = fetch_room_position(int(self.current_room_id))
+                if room_pos:
+                    # Apply scale to position
+                    x = room_pos[0] * (self.last_scale if hasattr(self, 'last_scale') else 1)
+                    y = room_pos[1] * (self.last_scale if hasattr(self, 'last_scale') else 1)
+                    
+                    # Calculate scroll to center on player
+                    scroll_width = new_bbox[2] - new_bbox[0] + 1000
+                    scroll_height = new_bbox[3] - new_bbox[1] + 1000
+                    
+                    scroll_x = (x - new_bbox[0] + 500 - canvas_width/2) / scroll_width
+                    scroll_y = (y - new_bbox[1] + 500 - canvas_height/2) / scroll_height
+                    
+                    self.this.xview_moveto(max(0, min(1, scroll_x)))
+                    self.this.yview_moveto(max(0, min(1, scroll_y)))
