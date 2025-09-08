@@ -35,8 +35,12 @@ class AutoWalker:
             
             if new_zone_id != self.map_viewer.displayed_zone_id:
                 self.map_viewer.display_zone(new_zone_id)
+            
             # Ensure room is highlighted after display update
             self.map_viewer.root.after(200, lambda: self.map_viewer.highlight_room(room_id))
+            
+            # Auto-fit the map to show everything - use the map's existing auto-fit
+            # (highlight_room already calls center_view_on_bounds if needed)
         
         self.map_viewer.root.after(0, update_display)
 
@@ -51,6 +55,18 @@ class AutoWalker:
 
     def _process_response(self, response, is_look_command=False):
         if not self.active or response is None:
+            return
+        
+        # Skip login/system messages that aren't room descriptions
+        login_indicators = ["Welcome back", "Gamedriver", "LPmud", "Reincarnating", 
+                          "posts waiting", "Mails waiting", "already existing"]
+        if any(indicator in response for indicator in login_indicators):
+            print(f"[Position] Ignoring login/system message")
+            return
+        
+        # Skip very short responses
+        if len(response) < 80:
+            print(f"[Position] Ignoring short response ({len(response)} chars)")
             return
         
         print(f"[Position] Analyzing response (look={is_look_command}) of length {len(response)}")
@@ -260,15 +276,19 @@ class AutoWalker:
             
             print(f"[Highlight] Best match: Room {best_room_id} with {best_similarity:.1%} similarity")
             
-            # If we found a perfect match, update position to the correct room!
-            if best_similarity >= 0.95:
+            # Always set position if we have a reasonable match (>60%)
+            if best_similarity >= 0.6 and best_room_id:
                 if best_room_id != matched_room_id:
-                    print(f"[Highlight] Correcting position from {matched_room_id} to {best_room_id} based on description match")
+                    print(f"[Highlight] Updating position from {matched_room_id} to {best_room_id} based on description match")
                 # Always set the best matching room
                 self.set_current_room(best_room_id)
                 matched_room_id = best_room_id  # Update for highlighting
+            elif matched_room_id:
+                # Use the exit-based match if description match is poor
+                print(f"[Highlight] Using exit-based match: room {matched_room_id}")
+                self.set_current_room(matched_room_id)
             
-            # Now do detailed matching with the best room
+            # Now do detailed matching with the best room for highlighting
             if best_description and best_similarity >= 0.9:
                 db_clean = self._clean_text_for_matching(best_description)
                 highlight_map = self._create_highlight_map(response, response_clean, db_clean)

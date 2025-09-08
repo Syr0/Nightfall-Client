@@ -1,9 +1,13 @@
 #database.py
-import webbrowser
-import threading
-import logging
-import sqlite3
-import pyodbc
+# NEW: Using fast JSON-based database for instant operations
+from .fast_database import get_database
+import logging  # Still need logging for compatibility
+
+# OLD: Keeping old imports commented for fallback
+# import webbrowser
+# import threading
+# import sqlite3
+# import pyodbc
 
 #DATABASE Explaination
 #DirTbl maps Direction strings to DirRefs (IDs) and Revids(reverse travel). And Dx,Dy,Dz gives information where this direction needs to be placed on the mapper (e,g, x+200 y-200 z=0)
@@ -14,13 +18,19 @@ import pyodbc
 #PortalTbl contains all portals, ways that can be entered from anywhere and cannot be drawn as such.
 #ZoneTbl contains the Zones of the map. ZoneID references it Name is the caption. MinX MinY MaxX and MaxY show the total size of the zone. Dx and Dy the position and XOffset and YOffset how much they need to be movr to match upper and lower layers.X and Y seems to be the latest view center
 
-DB_FILE = r"..\..\Map.mdb"
-MEMORY_CONN = None
-DB_LOCK = threading.Lock()
-ROOM_NAME_CACHE = {}
-ROOM_DESCRIPTION_CACHE = {}
+# NEW: Get the global fast database instance
+_db = get_database()
+
+# OLD: Keeping old variables commented
+# DB_FILE = r"..\..\Map.mdb"
+# MEMORY_CONN = None
+# DB_LOCK = threading.Lock()
+# ROOM_NAME_CACHE = {}
+# ROOM_DESCRIPTION_CACHE = {}
 
 
+# OLD: All old database functions commented out
+'''
 def load_access_db_to_memory():
     global MEMORY_CONN
     logging.info("Starting to load Access DB into memory.")
@@ -59,99 +69,153 @@ def execute_query(query, params=(), fetch_one=False):
         cursor = MEMORY_CONN.cursor()
         cursor.execute(query, params)
         return cursor.fetchone() if fetch_one else cursor.fetchall()
+'''
 
+# NEW: Fast database functions
 def fetch_zones():
-    return execute_query("SELECT ZoneID, Name FROM ZoneTbl")
+    """Get all zones instantly from fast database"""
+    return _db.get_all_zones()
+    # OLD:
+    # return execute_query("SELECT ZoneID, Name FROM ZoneTbl")
 
 def fetch_min_max_levels(zone_id):
-    min_level = execute_query("SELECT MIN(Z) FROM ObjectTbl WHERE ZoneID = ?", (zone_id,))[0][0]
-    max_level = execute_query("SELECT MAX(Z) FROM ObjectTbl WHERE ZoneID = ?", (zone_id,))[0][0]
-    return min_level, max_level
+    """Get min/max Z levels for zone"""
+    rooms = _db.get_rooms_in_zone(zone_id)
+    if not rooms:
+        return None, None
+    z_levels = [r[3] for r in rooms if r[3] is not None]
+    if not z_levels:
+        return 0, 0
+    return min(z_levels), max(z_levels)
+    # OLD:
+    # min_level = execute_query("SELECT MIN(Z) FROM ObjectTbl WHERE ZoneID = ?", (zone_id,))[0][0]
+    # max_level = execute_query("SELECT MAX(Z) FROM ObjectTbl WHERE ZoneID = ?", (zone_id,))[0][0]
+    # return min_level, max_level
 
 def fetch_rooms(zone_id, z=None):
-    query = "SELECT ObjID, X, Y, Z, Name FROM ObjectTbl WHERE ZoneID = ?"
-    params = [zone_id]
-
-    if z is not None:
-        # Handle both NULL and specific z values - if z is 0, include NULL z values too
-        if z == 0:
-            query += " AND (Z = ? OR Z IS NULL)"
-            params.append(z)
-        else:
-            query += " AND Z = ?"
-            params.append(z)
-    return execute_query(query, params)
+    """Get rooms in zone instantly from fast database"""
+    return _db.get_rooms_in_zone(zone_id, z)
+    # OLD:
+    # query = "SELECT ObjID, X, Y, Z, Name FROM ObjectTbl WHERE ZoneID = ?"
+    # params = [zone_id]
+    # if z is not None:
+    #     if z == 0:
+    #         query += " AND (Z = ? OR Z IS NULL)"
+    #         params.append(z)
+    #     else:
+    #         query += " AND Z = ?"
+    #         params.append(z)
+    # return execute_query(query, params)
 
 def fetch_exits_with_zone_info(from_obj_ids):
-    placeholders = ','.join('?' for _ in from_obj_ids)
-    query = f"""
-    SELECT e.FromID, e.ToID, o.ZoneID
-    FROM ExitTbl e
-    JOIN ObjectTbl o ON e.ToID = o.ObjID
-    WHERE e.FromID IN ({placeholders})
-    """
-    return execute_query(query, from_obj_ids)
+    """Get exits with zone info instantly from fast database"""
+    return _db.get_exits_with_zone_info(from_obj_ids)
+    # OLD:
+    # placeholders = ','.join('?' for _ in from_obj_ids)
+    # query = f"""
+    # SELECT e.FromID, e.ToID, o.ZoneID
+    # FROM ExitTbl e
+    # JOIN ObjectTbl o ON e.ToID = o.ObjID
+    # WHERE e.FromID IN ({placeholders})
+    # """
+    # return execute_query(query, from_obj_ids)
 
 def fetch_zone_bounds(zone_id):
-    return execute_query("SELECT MinX, MinY, MaxX, MaxY FROM ZoneTbl WHERE ZoneID = ?", (zone_id,), fetch_one=True)
+    """Get zone bounds from fast database"""
+    zone = _db.get_zone(zone_id)
+    if zone and zone.get("bounds"):
+        b = zone["bounds"]
+        return (b["min_x"], b["min_y"], b["max_x"], b["max_y"])
+    return None
+    # OLD:
+    # return execute_query("SELECT MinX, MinY, MaxX, MaxY FROM ZoneTbl WHERE ZoneID = ?", (zone_id,), fetch_one=True)
 
 def fetch_room_name(room_id):
-    room_id_int = int(room_id)
-    result = execute_query("SELECT Name FROM ObjectTbl WHERE ObjID = ?", (room_id_int,), fetch_one=True)
-    if result:
-        ROOM_NAME_CACHE[room_id] = result[0]
-        return result[0]
-    else:
-        logging.info(f"No name found for RoomID: {room_id}")
-        return "Unknown Room"
+    """Get room name instantly from fast database"""
+    return _db.get_room_name(room_id)
+    # OLD:
+    # room_id_int = int(room_id)
+    # result = execute_query("SELECT Name FROM ObjectTbl WHERE ObjID = ?", (room_id_int,), fetch_one=True)
+    # if result:
+    #     ROOM_NAME_CACHE[room_id] = result[0]
+    #     return result[0]
+    # else:
+    #     logging.info(f"No name found for RoomID: {room_id}")
+    #     return "Unknown Room"
 
 def fetch_room_descriptions():
-    if not ROOM_DESCRIPTION_CACHE:
-        for obj_id, desc in execute_query("SELECT ObjID, Desc FROM ObjectTbl"):
-            ROOM_DESCRIPTION_CACHE[obj_id] = desc
-    return ROOM_DESCRIPTION_CACHE
+    """Get all room descriptions instantly from fast database"""
+    return _db.get_all_room_descriptions()
+    # OLD:
+    # if not ROOM_DESCRIPTION_CACHE:
+    #     for obj_id, desc in execute_query("SELECT ObjID, Desc FROM ObjectTbl"):
+    #         ROOM_DESCRIPTION_CACHE[obj_id] = desc
+    # return ROOM_DESCRIPTION_CACHE
 
 def fetch_zone_info():
-    query = "SELECT ZoneID, Name, MinX, MinY, MaxX, MaxY FROM ZoneTbl"
-    return execute_query(query)
+    """Get all zone info from fast database"""
+    zones = []
+    for zone_id, zone in _db.data["zones"].items():
+        b = zone.get("bounds", {})
+        zones.append((int(zone_id), zone["name"], 
+                     b.get("min_x"), b.get("min_y"), 
+                     b.get("max_x"), b.get("max_y")))
+    return zones
+    # OLD:
+    # query = "SELECT ZoneID, Name, MinX, MinY, MaxX, MaxY FROM ZoneTbl"
+    # return execute_query(query)
 
 
 def fetch_room_position(room_id):
-    result = execute_query("SELECT X, Y, Z FROM ObjectTbl WHERE ObjID = ?", (room_id,), fetch_one=True)
-    if result:
-        # Return x, y, and z (z might be None)
-        return result[0], result[1], result[2] if len(result) > 2 else None
-    return None
+    """Get room position instantly from fast database"""
+    return _db.get_room_position(room_id)
+    # OLD:
+    # result = execute_query("SELECT X, Y, Z FROM ObjectTbl WHERE ObjID = ?", (room_id,), fetch_one=True)
+    # if result:
+    #     return result[0], result[1], result[2] if len(result) > 2 else None
+    # return None
 
 
 def fetch_connected_rooms(current_room_id):
-    connected_room_ids = [row[1] for row in execute_query("SELECT FromID, ToID FROM ExitTbl WHERE FromID = ?", (current_room_id,))]
-    placeholders = ', '.join('?' for _ in connected_room_ids)
-    query = f"SELECT ObjID, Desc FROM ObjectTbl WHERE ObjID IN ({placeholders})"
-    results = execute_query(query, connected_room_ids)
-    return {result[0]: result[1].strip().replace('\r\n', ' ').replace('\n', ' ') for result in results}
+    """Get connected room descriptions instantly from fast database"""
+    return _db.get_connected_room_descriptions(current_room_id)
+    # OLD:
+    # connected_room_ids = [row[1] for row in execute_query("SELECT FromID, ToID FROM ExitTbl WHERE FromID = ?", (current_room_id,))]
+    # placeholders = ', '.join('?' for _ in connected_room_ids)
+    # query = f"SELECT ObjID, Desc FROM ObjectTbl WHERE ObjID IN ({placeholders})"
+    # results = execute_query(query, connected_room_ids)
+    # return {result[0]: result[1].strip().replace('\r\n', ' ').replace('\n', ' ') for result in results}
 
 def fetch_zone_name(zone_id):
-    query = "SELECT Name FROM ZoneTbl WHERE ZoneID = ?"
-    result = execute_query(query, (zone_id,), fetch_one=True)
-    return result[0] if result else "Unknown Zone"
+    """Get zone name instantly from fast database"""
+    return _db.get_zone_name(zone_id)
+    # OLD:
+    # query = "SELECT Name FROM ZoneTbl WHERE ZoneID = ?"
+    # result = execute_query(query, (zone_id,), fetch_one=True)
+    # return result[0] if result else "Unknown Zone"
 
 def fetch_room_zone_id(room_id):
-    query = "SELECT ZoneID FROM ObjectTbl WHERE ObjID = ?"
-    result = execute_query(query, (room_id,), fetch_one=True)
-    if result:
-        return result[0]
-    else:
-        logging.info(f"No ZoneID found for RoomID: {room_id}")
-        return None
+    """Get room's zone ID instantly from fast database"""
+    return _db.get_room_zone(room_id)
+    # OLD:
+    # query = "SELECT ZoneID FROM ObjectTbl WHERE ObjID = ?"
+    # result = execute_query(query, (room_id,), fetch_one=True)
+    # if result:
+    #     return result[0]
+    # else:
+    #     logging.info(f"No ZoneID found for RoomID: {room_id}")
+    #     return None
 
 
-load_access_db_to_memory()
+# NEW: Database loads automatically from JSON on import
+# No need for explicit loading - happens instantly in FastDatabase.__init__()
 
-access_driver = (find_access_driver())
-if access_driver is None:
-    print("Microsoft Access Driver not found.")
-    print("Please download and install the 64-bit Microsoft Access Database Engine 2016 Redistributable.")
-    webbrowser.open("https://www.microsoft.com/en-us/download/details.aspx?id=54920")
+# OLD: Access DB loading commented out
+# load_access_db_to_memory()
+# access_driver = (find_access_driver())
+# if access_driver is None:
+#     print("Microsoft Access Driver not found.")
+#     print("Please download and install the 64-bit Microsoft Access Database Engine 2016 Redistributable.")
+#     webbrowser.open("https://www.microsoft.com/en-us/download/details.aspx?id=54920")
 
 

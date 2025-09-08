@@ -41,7 +41,7 @@ class MapViewer:
 
         self.this = tk.Canvas(self.parent, bg=self.background_color, highlightthickness=0)
         self.this.pack(fill=tk.BOTH, expand=True)
-        self.camera = map.camera.Camera(self.this)
+        self.camera = map.camera.Camera(self.this)  # Keep camera for manual zoom
         
         # Initialize room customization manager
         self.room_customization = RoomCustomization()
@@ -140,6 +140,11 @@ class MapViewer:
 
         self.draw_map(rooms, exits_info)
         print(f"Display Zone: Zone ID = {zone_id}, Level = {self.current_level}")
+        
+        # Update scroll region but don't auto-zoom
+        if hasattr(self, 'drawn_bounds') and self.drawn_bounds:
+            min_x, min_y, max_x, max_y = self.drawn_bounds
+            self.center_view_on_bounds(min_x, min_y, max_x, max_y)
 
 
     def change_level(self, delta):
@@ -322,35 +327,35 @@ class MapViewer:
             self.this.itemconfig(room_tag, fill=fill_color)
     
     def update_position_indicator(self, room_id):
-        """Add a light grey circle around current position"""
+        """Add a very subtle circle around current position"""
         # Remove old position indicator
         self.this.delete("position_indicator")
         
-        # Get room position from database
-        room_pos = fetch_room_position(int(room_id))
-        if room_pos:
-            x = room_pos[0]
-            y = room_pos[1]
+        # Find the room rectangle on canvas
+        room_tag = f"{room_id}_room"
+        room_coords = self.this.bbox(room_tag)  # Use bbox for accurate bounds
+        
+        if room_coords:
+            # Get exact center of room
+            x = (room_coords[0] + room_coords[2]) / 2
+            y = (room_coords[1] + room_coords[3]) / 2
             
-            # Calculate radius based on current zoom to keep consistent screen size
-            # Base radius is 80 pixels on screen
-            screen_radius = 80
-            # Adjust for current zoom level (inverse relationship)
-            actual_radius = screen_radius / getattr(self.camera, 'zoom', 1.0) if hasattr(self, 'camera') else screen_radius
+            # Smaller, more subtle circle
+            radius = 40
             
-            # Use theme colors if available (use stipple for transparency effect)
-            fill_color = getattr(self, 'position_indicator_fill', '#F5F5F5')
-            outline_color = getattr(self, 'position_indicator_outline', '#E8E8E8')
-            
+            # Very light, subtle circle
             self.this.create_oval(
-                x - actual_radius, y - actual_radius,
-                x + actual_radius, y + actual_radius,
-                fill=fill_color,
-                outline=outline_color,
-                width=2,
-                stipple='gray25',  # Creates transparency effect
+                x - radius, y - radius,
+                x + radius, y + radius,
+                fill='',  # No fill, just outline
+                outline='#C0C0C0',  # Light grey outline
+                width=1,  # Thin line
+                dash=(5, 5),  # Dashed line for subtlety
                 tags=("position_indicator",)
             )
+            
+            # Put it behind everything
+            self.this.tag_lower("position_indicator")
             
             # Lower the indicator to be behind connections
             self.this.tag_lower("position_indicator")
@@ -376,11 +381,6 @@ class MapViewer:
             # Add position indicator circle
             self.update_position_indicator(room_id)
             print(f"[Map] Highlighted room {room_id}")
-            
-            # Ensure the entire map is visible after highlighting
-            if hasattr(self, 'drawn_bounds') and self.drawn_bounds:
-                min_x, min_y, max_x, max_y = self.drawn_bounds
-                self.this.after(100, lambda: self.center_view_on_bounds(min_x, min_y, max_x, max_y))
         else:
             print(f"[Map] Room {room_id} not found on current display")
     
@@ -470,39 +470,8 @@ class MapViewer:
                 print(f"[Customization] Failed to save customization for room {room_id}")
     
     def center_view_on_bounds(self, min_x, min_y, max_x, max_y):
-        """Fit all rooms in the view"""
-        # Add padding
-        padding = 50
-        
-        # Update scroll region to include all content
+        """Just update scroll region - don't mess with zoom or position"""
+        # Set scroll region
+        padding = 1000
         self.this.config(scrollregion=(min_x - padding, min_y - padding, 
                                        max_x + padding, max_y + padding))
-        
-        # Calculate center point
-        center_x = (min_x + max_x) / 2
-        center_y = (min_y + max_y) / 2
-        
-        # Get canvas dimensions
-        self.this.update_idletasks()
-        canvas_width = self.this.winfo_width()
-        canvas_height = self.this.winfo_height()
-        
-        if canvas_width > 1 and canvas_height > 1:
-            # Calculate the view area
-            content_width = max_x - min_x + 2 * padding
-            content_height = max_y - min_y + 2 * padding
-            
-            # Calculate scale to fit all content
-            if content_width > 0 and content_height > 0:
-                scale_x = canvas_width / content_width
-                scale_y = canvas_height / content_height
-                scale = min(scale_x, scale_y)
-                
-                # Apply zoom to fit all rooms
-                if scale != 1.0 and hasattr(self, 'camera'):
-                    self.camera.zoom = scale
-                    self.this.scale("all", center_x, center_y, scale, scale)
-            
-            # Reset view to top-left to show all content
-            self.this.xview_moveto(0)
-            self.this.yview_moveto(0)
