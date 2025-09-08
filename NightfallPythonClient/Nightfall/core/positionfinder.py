@@ -58,7 +58,10 @@ class AutoWalker:
 
     def _process_response(self, response, is_look_command=False):
         if not self.active or response is None:
+            print(f"[POSITION] Not processing: active={self.active}, response={response is not None}")
             return
+        
+        print(f"[POSITION] Processing response (is_look={is_look_command}, length={len(response)})")
         
         login_indicators = ["Welcome back", "Gamedriver", "LPmud", "Reincarnating", 
                           "posts waiting", "Mails waiting", "already existing"]
@@ -79,6 +82,13 @@ class AutoWalker:
             room_descriptions[self.current_room_id] = current_room_description
         best_match = self._find_matching_room_with_exits(exit_info, words_in_response, room_descriptions)
         if best_match:
+            print(f"[POSITION] Found matching room: {best_match}")
+            
+            # Extract items/NPCs from the response
+            items = self._extract_items(response)
+            if items:
+                self._save_room_items(best_match, items)
+            
             if is_look_command:
                 try:
                     self._calculate_highlighting(response, best_match, is_look_command)
@@ -91,63 +101,172 @@ class AutoWalker:
 
     def _extract_exit_info(self, response):
         import re
-        exits_pattern = r"There (?:are|is) (\w+) exits?:\s*([^.]+)\.?"
-        match = re.search(exits_pattern, response, re.IGNORECASE)
         
-        if match:
-            count_word = match.group(1).lower()
-            exits_text = match.group(2).lower()
-            
-            count_map = {'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
-                        'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10}
-            exit_count = count_map.get(count_word, 0)
-            
-            exit_dirs = [e.strip() for e in exits_text.replace(' and ', ', ').split(',')]
-            
-            return {'count': exit_count, 'directions': exit_dirs}
+        # Multiple patterns to match different exit formats
+        patterns = [
+            # Main pattern from Stunty - most comprehensive
+            r'^\s*There (?:is|are) \w+ (?:visible |obvious )*(?:exit.?|path)s?(?: here)?:\s*(.*)',
+            # Alternate: "The path leads north and west."
+            r'The path leads?\s+(.+?)\.',
+            # Older pattern for fallback
+            r"There (?:are|is) (\w+) exits?:\s*([^.]+)\.?",
+            # Simple "Exits: north, south"
+            r'Exits?:\s*([^.]+)',
+        ]
+        
+        for pattern in patterns:
+            match = re.search(pattern, response, re.IGNORECASE | re.MULTILINE)
+            if match:
+                # Extract exit directions from the matched text
+                if len(match.groups()) == 2:
+                    # Pattern with count word
+                    count_word = match.group(1).lower()
+                    exits_text = match.group(2).lower()
+                    count_map = {'one': 1, 'two': 2, 'three': 3, 'four': 4, 'five': 5,
+                                'six': 6, 'seven': 7, 'eight': 8, 'nine': 9, 'ten': 10}
+                    exit_count = count_map.get(count_word, 0)
+                else:
+                    # Pattern without count
+                    exits_text = match.group(1).lower()
+                    exit_count = 0
+                
+                # Parse directions from text
+                # Handle "north and west" or "north, south, east"
+                exits_text = exits_text.replace(' and ', ', ')
+                exit_dirs = [e.strip() for e in exits_text.split(',')]
+                # Clean up directions
+                exit_dirs = [d for d in exit_dirs if d in ['north', 'south', 'east', 'west', 
+                                                           'northeast', 'northwest', 'southeast', 'southwest',
+                                                           'up', 'down', 'in', 'out', 'enter', 'leave',
+                                                           'n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw', 'u', 'd']]
+                
+                if exit_dirs:
+                    print(f"[POSITION] Found exits: {exit_dirs}")
+                    return {'count': len(exit_dirs), 'directions': exit_dirs}
         
         return None
     
     def _find_matching_room_with_exits(self, exit_info, words_in_response, room_descriptions):
-        best_match = None
-        best_score = 0
+        from core.fast_database import get_database
+        db = get_database()
+        
+        # Collect all candidates with their scores
+        candidates = []
         
         for room_id, description in room_descriptions.items():
-            score = 0
+            description_score = 0
+            exit_score = 0
+            exit_match_ratio = 0
             
-            if exit_info and description:
-                desc_lower = description.lower()
-                exit_patterns = [
-                    f"there are {exit_info['count']} exits",
-                    f"there is {exit_info['count']} exit",
-                    f"{exit_info['count']} exits",
-                    f"{exit_info['count']} obvious exits"
-                ]
-                
-                for pattern in exit_patterns:
-                    if pattern in desc_lower:
-                        score += 100
-                        break
-                
-                for direction in exit_info.get('directions', []):
-                    if direction in desc_lower:
-                        score += 10
-            
+            # Check description similarity
             description = description or ""
             room_name = fetch_room_name(room_id) or ""
             combined_text = description + " " + room_name
             words_in_description = set(combined_text.split())
             common_words = words_in_response.intersection(words_in_description)
-            score += len(common_words)
+            description_score = len(common_words)
             
-            if score > best_score:
-                best_score = score
-                best_match = room_id
+            # Check if exits match what's in the database
+            if exit_info:
+                room_exits = db.get_room_exits(room_id)
+                if room_exits:
+                    # Get exit directions from database
+                    db_directions = set()
+                    for exit in room_exits:
+                        exit_type = exit.get('type', -1)
+                        # Map exit types to directions
+                        type_to_dir = {
+                            0: 'north', 1: 'northeast', 2: 'east', 3: 'southeast',
+                            4: 'south', 5: 'southwest', 6: 'west', 7: 'northwest',
+                            8: 'up', 9: 'down', 10: 'enter', 11: 'leave'
+                        }
+                        if exit_type in type_to_dir:
+                            db_directions.add(type_to_dir[exit_type])
+                            # Also add short forms
+                            short_forms = {'north': 'n', 'south': 's', 'east': 'e', 'west': 'w',
+                                         'northeast': 'ne', 'northwest': 'nw', 'southeast': 'se', 'southwest': 'sw',
+                                         'up': 'u', 'down': 'd'}
+                            if type_to_dir[exit_type] in short_forms:
+                                db_directions.add(short_forms[type_to_dir[exit_type]])
+                    
+                    # Check if response exits match database exits
+                    response_dirs = set(exit_info.get('directions', []))
+                    
+                    # Expand short forms in response to match
+                    expanded_response = response_dirs.copy()
+                    expand_map = {'n': 'north', 's': 'south', 'e': 'east', 'w': 'west',
+                                'ne': 'northeast', 'nw': 'northwest', 'se': 'southeast', 'sw': 'southwest',
+                                'u': 'up', 'd': 'down'}
+                    for short, long in expand_map.items():
+                        if short in response_dirs:
+                            expanded_response.add(long)
+                        if long in response_dirs:
+                            expanded_response.add(short)
+                    
+                    # Check for match
+                    matching_exits = expanded_response.intersection(db_directions)
+                    if len(expanded_response) > 0 or len(db_directions) > 0:
+                        exit_match_ratio = len(matching_exits) / max(len(expanded_response), len(db_directions))
+                        exit_score = int(200 * exit_match_ratio)  # Up to 200 points for perfect exit match
+            
+            total_score = description_score + exit_score
+            if total_score > 0:
+                candidates.append({
+                    'room_id': room_id,
+                    'total_score': total_score,
+                    'description_score': description_score,
+                    'exit_score': exit_score,
+                    'exit_match_ratio': exit_match_ratio
+                })
         
-        if not best_match or best_score < 50:
-            best_match = self._find_matching_room(words_in_response, room_descriptions)
+        # Sort candidates by total score (descending)
+        candidates.sort(key=lambda x: x['total_score'], reverse=True)
         
-        return best_match
+        if not candidates:
+            print("[POSITION] No matching rooms found")
+            return None
+        
+        # Get the top score
+        top_score = candidates[0]['total_score']
+        
+        # Find all candidates within 20% of the top score
+        threshold = top_score * 0.8
+        top_candidates = [c for c in candidates if c['total_score'] >= threshold]
+        
+        print(f"[POSITION] Found {len(top_candidates)} candidates with similar scores (top score: {top_score})")
+        
+        # Among top candidates, prefer the one with best exit match
+        best_candidate = None
+        best_exit_ratio = -1
+        
+        for candidate in top_candidates[:10]:  # Check top 10 candidates max
+            room_id = candidate['room_id']
+            exit_ratio = candidate['exit_match_ratio']
+            
+            print(f"[POSITION] Candidate room {room_id}: desc_score={candidate['description_score']}, "
+                  f"exit_score={candidate['exit_score']}, exit_match={exit_ratio:.2f}")
+            
+            # Prefer candidates with better exit matches
+            if exit_ratio > best_exit_ratio:
+                best_exit_ratio = exit_ratio
+                best_candidate = candidate
+            elif exit_ratio == best_exit_ratio and best_candidate:
+                # If exit match is same, prefer higher description score
+                if candidate['description_score'] > best_candidate['description_score']:
+                    best_candidate = candidate
+        
+        if best_candidate:
+            if best_candidate['exit_match_ratio'] >= 0.8:
+                print(f"[POSITION] Selected room {best_candidate['room_id']} with excellent exit match ({best_candidate['exit_match_ratio']:.2f})")
+            elif best_candidate['exit_match_ratio'] >= 0.5:
+                print(f"[POSITION] Selected room {best_candidate['room_id']} with partial exit match ({best_candidate['exit_match_ratio']:.2f})")
+            else:
+                print(f"[POSITION] Selected room {best_candidate['room_id']} based on description (poor exit match: {best_candidate['exit_match_ratio']:.2f})")
+            return best_candidate['room_id']
+        
+        # Fallback
+        print("[POSITION] Using fallback room selection")
+        return candidates[0]['room_id'] if candidates else None
     
     def _find_matching_room(self, words_in_response, room_descriptions):
         best_match = None
@@ -291,6 +410,111 @@ class AutoWalker:
             'ranges': highlight_ranges,
             'similarity': len(matches) / max(m, n) if max(m, n) > 0 else 0
         }
+    
+    def _extract_items(self, response):
+        """Extract items and NPCs from room description"""
+        import re
+        
+        # Split response into lines
+        lines = response.split('\n')
+        
+        # Find where exits line is (items/NPCs come after)
+        exit_line_idx = -1
+        for i, line in enumerate(lines):
+            if re.search(r'(?:There (?:is|are)|The path leads|Exits?:)', line, re.IGNORECASE):
+                exit_line_idx = i
+                break
+        
+        if exit_line_idx == -1:
+            return []
+        
+        items = []
+        # Look at lines after the exit line
+        for i in range(exit_line_idx + 1, len(lines)):
+            line = lines[i].strip()
+            
+            # Skip empty lines
+            if not line:
+                continue
+            
+            # Skip prompt lines
+            if line.startswith('>') or line == '>' or '> ' in line:
+                continue
+                
+            # Clean ANSI codes if present
+            ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+            line = ansi_escape.sub('', line)
+            
+            # Common patterns for items/NPCs:
+            # "A stone obelisk with an inscription."
+            # "Marvin, the cheerful juggler."
+            # "An armourers cart."
+            
+            # Skip if it looks like a room description continuation
+            if len(line) > 100:
+                continue
+            
+            # If line ends with period and doesn't look like exits, it's likely an item
+            if line.endswith('.'):
+                # Remove the period
+                item_name = line[:-1].strip()
+                
+                # Clean up common prefixes
+                if item_name.lower().startswith('a '):
+                    item_name = item_name[2:]
+                elif item_name.lower().startswith('an '):
+                    item_name = item_name[3:]
+                elif item_name.lower().startswith('the '):
+                    item_name = item_name[4:]
+                    
+                if item_name:
+                    items.append(item_name)
+                    print(f"[POSITION] Found item/NPC: {item_name}")
+        
+        return items
+    
+    def _save_room_items(self, room_id, items):
+        """Save items to the room data"""
+        import json
+        import os
+        from datetime import datetime
+        
+        # Load or create items database
+        items_file = os.path.join(os.path.dirname(__file__), '../data/room_items.json')
+        
+        try:
+            if os.path.exists(items_file):
+                with open(items_file, 'r', encoding='utf-8') as f:
+                    items_data = json.load(f)
+            else:
+                items_data = {}
+        except Exception as e:
+            print(f"[POSITION] Error loading items data: {e}")
+            items_data = {}
+        
+        # Update room items
+        room_key = str(room_id)
+        if room_key not in items_data:
+            items_data[room_key] = {
+                'items': [],
+                'last_seen': {}
+            }
+        
+        # Update items with timestamp
+        current_time = datetime.now().isoformat()
+        for item in items:
+            if item not in items_data[room_key]['items']:
+                items_data[room_key]['items'].append(item)
+            items_data[room_key]['last_seen'][item] = current_time
+        
+        # Save back to file
+        try:
+            os.makedirs(os.path.dirname(items_file), exist_ok=True)
+            with open(items_file, 'w', encoding='utf-8') as f:
+                json.dump(items_data, f, indent=2, ensure_ascii=False)
+            print(f"[POSITION] Saved {len(items)} items for room {room_id}")
+        except Exception as e:
+            print(f"[POSITION] Error saving items data: {e}")
     
     def _map_to_original_positions(self, original, clean, clean_positions):
         try:

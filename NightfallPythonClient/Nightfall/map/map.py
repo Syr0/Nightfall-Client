@@ -62,6 +62,8 @@ class MapViewer:
         self.this.bind("<Escape>", lambda e: self.stop_autowalk())
         # Bind Ctrl+F for room search
         self.this.bind("<Control-f>", lambda e: self.show_room_search_dialog())
+        # Bind Ctrl+I for item search
+        self.this.bind("<Control-i>", lambda e: self.show_item_search_dialog())
         # Focus canvas to receive keyboard events
         self.this.focus_set()
 
@@ -153,9 +155,11 @@ class MapViewer:
         return {zone[1]: zone[0] for zone in zones}
 
     def initialize_level_ui(self):
-        self.level_frame = tk.Frame(self.parent)
-        self.level_frame.pack(side=tk.TOP, fill=tk.X)
-        
+        # Don't create our own toolbar - parent will provide one
+        pass
+    
+    def add_map_controls_to_toolbar(self, toolbar):
+        """Add map-specific controls to the main toolbar"""
         # Get theme colors
         if self.theme_manager:
             theme = self.theme_manager.get_theme()
@@ -171,96 +175,139 @@ class MapViewer:
             button_fg = fg_color
             hover_color = '#FF6EC7'
         
-        # Create toolbar frame with theme
-        toolbar = tk.Frame(self.level_frame, height=35, bg=bg_color)
-        toolbar.pack(side=tk.TOP, fill=tk.X, pady=2)
+        # Add separator
+        sep1 = tk.Frame(toolbar, width=2, bg=fg_color)
+        sep1.pack(side=tk.LEFT, fill=tk.Y, padx=5)
         
-        # Level label with theme
+        # Level controls (replacing duplicates)
         level_label = tk.Label(toolbar, textvariable=self.level_var, bg=bg_color, fg=fg_color, font=('Consolas', 10))
-        level_label.pack(side=tk.LEFT, padx=10)
+        level_label.pack(side=tk.LEFT, padx=5)
         
-        # Up button (icon only) with theme
         up_btn = tk.Button(toolbar, text="⬆", command=lambda: self.change_level(1), 
-                          width=3, bg=button_bg, fg=button_fg, relief="flat", 
-                          font=('Arial', 12), cursor="hand2")
-        up_btn.pack(side=tk.LEFT, padx=2)
+                          width=2, bg=button_bg, fg=button_fg, relief="flat", 
+                          font=('Arial', 10), cursor="hand2")
+        up_btn.pack(side=tk.LEFT, padx=1)
         
-        # Down button (icon only) with theme
         down_btn = tk.Button(toolbar, text="⬇", command=lambda: self.change_level(-1), 
-                            width=3, bg=button_bg, fg=button_fg, relief="flat",
-                            font=('Arial', 12), cursor="hand2")
-        down_btn.pack(side=tk.LEFT, padx=2)
+                            width=2, bg=button_bg, fg=button_fg, relief="flat",
+                            font=('Arial', 10), cursor="hand2")
+        down_btn.pack(side=tk.LEFT, padx=1)
         
-        # Manual position finding button - circle with crosshair
-        find_btn = tk.Canvas(toolbar, width=30, height=30, highlightthickness=0, bg=bg_color)
-        find_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Draw circle with theme color
-        find_btn.create_oval(5, 5, 25, 25, outline=fg_color, width=2)
-        # Draw crosshair
-        find_btn.create_line(15, 9, 15, 21, fill=fg_color, width=1)
-        find_btn.create_line(9, 15, 21, 15, fill=fg_color, width=1)
-        
-        # Bind click to manual position finding
+        # Position finding button
+        find_btn = tk.Canvas(toolbar, width=25, height=25, highlightthickness=0, bg=bg_color)
+        find_btn.pack(side=tk.LEFT, padx=3)
+        find_btn.create_oval(3, 3, 22, 22, outline=fg_color, width=2)
+        find_btn.create_line(12, 7, 12, 18, fill=fg_color, width=1)
+        find_btn.create_line(7, 12, 18, 12, fill=fg_color, width=1)
         find_btn.bind("<Button-1>", lambda e: self.manual_find_position())
+        self._add_tooltip(find_btn, "Find Position (L)")
         
-        # Player location button - center on current room
-        location_btn = tk.Canvas(toolbar, width=30, height=30, highlightthickness=0, bg=bg_color)
-        location_btn.pack(side=tk.LEFT, padx=5)
-        
-        # Draw location pin icon
-        location_btn.create_oval(10, 8, 20, 18, fill=hover_color, outline=fg_color, width=1)
-        location_btn.create_polygon(15, 18, 11, 25, 15, 22, 19, 25, fill=hover_color, outline=fg_color, width=1)
-        location_btn.create_oval(13, 11, 17, 15, fill=bg_color, outline="")
-        
-        # Bind click to center on player
+        # Center on player button
+        location_btn = tk.Canvas(toolbar, width=25, height=25, highlightthickness=0, bg=bg_color)
+        location_btn.pack(side=tk.LEFT, padx=3)
+        location_btn.create_oval(8, 6, 17, 15, fill=hover_color, outline=fg_color, width=1)
+        location_btn.create_polygon(12, 15, 9, 21, 12, 19, 15, 21, fill=hover_color, outline=fg_color, width=1)
+        location_btn.create_oval(10, 8, 14, 12, fill=bg_color, outline="")
         def center_on_player(e=None):
             if hasattr(self, 'current_highlight') and self.current_highlight:
                 self.center_on_room(self.current_highlight)
         location_btn.bind("<Button-1>", center_on_player)
+        self._add_tooltip(location_btn, "Center on Player")
         
-        # Search button
-        search_btn = tk.Canvas(toolbar, width=30, height=30, highlightthickness=0, bg=bg_color)
-        search_btn.pack(side=tk.LEFT, padx=5)
+        # Room search button
+        room_search_btn = tk.Canvas(toolbar, width=25, height=25, highlightthickness=0, bg=bg_color)
+        room_search_btn.pack(side=tk.LEFT, padx=3)
+        room_search_btn.create_oval(6, 6, 16, 16, outline=fg_color, width=2)
+        room_search_btn.create_line(14, 14, 20, 20, fill=fg_color, width=2)
+        room_search_btn.bind("<Button-1>", lambda e: self.show_room_search_dialog())
+        self._add_tooltip(room_search_btn, "Search Rooms (Ctrl+F)")
         
-        # Draw magnifying glass icon
-        search_btn.create_oval(8, 8, 18, 18, outline=fg_color, width=2)
-        search_btn.create_line(16, 16, 22, 22, fill=fg_color, width=2)
+        # Item search button
+        item_search_btn = tk.Canvas(toolbar, width=25, height=25, highlightthickness=0, bg=bg_color)
+        item_search_btn.pack(side=tk.LEFT, padx=3)
+        # Draw box/package icon for items
+        item_search_btn.create_rectangle(7, 10, 18, 20, outline=fg_color, width=2)
+        item_search_btn.create_line(7, 13, 18, 13, fill=fg_color, width=1)
+        item_search_btn.create_line(12, 7, 12, 13, fill=fg_color, width=1)
+        item_search_btn.bind("<Button-1>", lambda e: self.show_item_search_dialog())
+        self._add_tooltip(item_search_btn, "Search Items (Ctrl+I)")
         
-        # Bind click to search
-        search_btn.bind("<Button-1>", lambda e: self.show_room_search_dialog())
+        # Simple hover effect for all buttons
+        for btn in [find_btn, location_btn, room_search_btn, item_search_btn]:
+            self._add_hover_effect(btn, hover_color, fg_color)
+    
+    def _add_hover_effect(self, canvas, hover_color, normal_color):
+        """Add simple color change on hover"""
+        def on_enter(e):
+            for item in canvas.find_all():
+                item_type = canvas.type(item)
+                try:
+                    # Different item types have different options
+                    if item_type in ['oval', 'rectangle', 'polygon']:
+                        current_outline = canvas.itemcget(item, 'outline')
+                        if current_outline and current_outline != '':
+                            canvas.itemconfig(item, outline=hover_color)
+                        current_fill = canvas.itemcget(item, 'fill')
+                        if current_fill and current_fill != '' and current_fill != self.background_color:
+                            canvas.itemconfig(item, fill=hover_color)
+                    elif item_type == 'line':
+                        canvas.itemconfig(item, fill=hover_color)
+                except tk.TclError:
+                    pass  # Item doesn't support this option
         
-        # Add hover effects for all canvas buttons
-        def add_hover(canvas, redraw_func):
-            def on_enter(e):
-                canvas.delete("all")
-                redraw_func(hover_color, "hover")
-            def on_leave(e):
-                canvas.delete("all")
-                redraw_func(fg_color, "normal")
-            canvas.bind("<Enter>", on_enter)
-            canvas.bind("<Leave>", on_leave)
+        def on_leave(e):
+            for item in canvas.find_all():
+                item_type = canvas.type(item)
+                try:
+                    if item_type in ['oval', 'rectangle', 'polygon']:
+                        current_outline = canvas.itemcget(item, 'outline')
+                        if current_outline and current_outline != '':
+                            canvas.itemconfig(item, outline=normal_color)
+                        current_fill = canvas.itemcget(item, 'fill')
+                        # Keep hover color for location pin oval
+                        if current_fill and current_fill != '' and current_fill != self.background_color:
+                            if not (item_type == 'oval' and current_fill == hover_color):
+                                canvas.itemconfig(item, fill=normal_color)
+                    elif item_type == 'line':
+                        canvas.itemconfig(item, fill=normal_color)
+                except tk.TclError:
+                    pass
         
-        # Hover for find button
-        def redraw_find(color, state):
-            find_btn.create_oval(5, 5, 25, 25, outline=color, width=2, tags=state)
-            find_btn.create_line(15, 9, 15, 21, fill=color, width=1, tags=state)
-            find_btn.create_line(9, 15, 21, 15, fill=color, width=1, tags=state)
-        add_hover(find_btn, redraw_find)
+        canvas.bind("<Enter>", on_enter)
+        canvas.bind("<Leave>", on_leave)
+    
+    def _add_tooltip(self, widget, text):
+        """Add simple tooltip on hover"""
+        widget.tooltip = None
+        widget.tooltip_timer = None
         
-        # Hover for location button
-        def redraw_location(color, state):
-            fill_color = hover_color if state == "hover" else hover_color
-            location_btn.create_oval(10, 8, 20, 18, fill=fill_color, outline=color, width=1, tags=state)
-            location_btn.create_polygon(15, 18, 11, 25, 15, 22, 19, 25, fill=fill_color, outline=color, width=1, tags=state)
-            location_btn.create_oval(13, 11, 17, 15, fill=bg_color, outline="", tags=state)
-        add_hover(location_btn, redraw_location)
+        def show_tooltip():
+            if widget.tooltip is None:
+                widget.tooltip = tk.Toplevel()
+                widget.tooltip.wm_overrideredirect(True)
+                x = widget.winfo_rootx() + 15
+                y = widget.winfo_rooty() + 25
+                widget.tooltip.wm_geometry(f"+{x}+{y}")
+                label = tk.Label(widget.tooltip, text=text, bg="#333333", fg="white", 
+                               font=('Arial', 9), padx=5, pady=2)
+                label.pack()
         
-        # Hover for search button
-        def redraw_search(color, state):
-            search_btn.create_oval(8, 8, 18, 18, outline=color, width=2, tags=state)
-            search_btn.create_line(16, 16, 22, 22, fill=color, width=2, tags=state)
-        add_hover(search_btn, redraw_search)
+        def on_enter(e):
+            if widget.tooltip_timer:
+                widget.after_cancel(widget.tooltip_timer)
+            widget.tooltip_timer = widget.after(500, show_tooltip)
+        
+        def on_leave(e):
+            if widget.tooltip_timer:
+                widget.after_cancel(widget.tooltip_timer)
+                widget.tooltip_timer = None
+            if widget.tooltip:
+                widget.tooltip.destroy()
+                widget.tooltip = None
+        
+        # Use add='+' to not override existing bindings
+        widget.bind("<Enter>", on_enter, add='+')
+        widget.bind("<Leave>", on_leave, add='+')
 
     def display_zone(self, zone_id, auto_fit=True):
         self.displayed_zone_id = zone_id
@@ -575,6 +622,201 @@ class MapViewer:
                 results_window.destroy()
         
         listbox.bind('<Double-Button-1>', on_result_double_click)
+    
+    def show_item_search_dialog(self):
+        """Show dialog to search for items/NPCs"""
+        import tkinter.simpledialog as simpledialog
+        import json
+        import os
+        from core.fast_database import get_database
+        
+        # Create search dialog
+        search_text = simpledialog.askstring(
+            "Search Items/NPCs",
+            "Enter item or NPC name to search for:",
+            parent=self.this
+        )
+        
+        if not search_text:
+            return
+        
+        # Load items database
+        items_file = os.path.join(os.path.dirname(__file__), '../data/room_items.json')
+        
+        try:
+            if os.path.exists(items_file):
+                with open(items_file, 'r', encoding='utf-8') as f:
+                    items_data = json.load(f)
+            else:
+                import tkinter.messagebox as messagebox
+                messagebox.showinfo("No Items", "No items database found. Explore rooms to build it!")
+                return
+        except Exception as e:
+            print(f"[ITEM SEARCH] Error loading items: {e}")
+            return
+        
+        # Search for items
+        search_lower = search_text.lower()
+        matches = []
+        db = get_database()
+        
+        for room_id, room_data in items_data.items():
+            for item in room_data['items']:
+                if search_lower in item.lower():
+                    # Get room info
+                    room = db.get_room(room_id)
+                    if room:
+                        room_name = room.get("name", "Unknown")
+                        zone_id = room.get("zone_id")
+                        zone_name = db.get_zone_name(zone_id) if zone_id else "Unknown Zone"
+                        last_seen = room_data['last_seen'].get(item, "Unknown")
+                        matches.append((room_id, room_name, zone_name, item, last_seen))
+        
+        if not matches:
+            import tkinter.messagebox as messagebox
+            messagebox.showinfo("Search Results", f"No items/NPCs found containing '{search_text}'")
+            return
+        
+        # Show results
+        self.show_item_search_results(matches, search_text)
+    
+    def show_item_search_results(self, matches, search_text):
+        """Display item search results"""
+        # Create results window
+        results_window = tk.Toplevel(self.root)
+        results_window.title(f"Item Search: '{search_text}'")
+        results_window.geometry("800x500")
+        
+        # Apply theme if available
+        if self.theme_manager:
+            theme = self.theme_manager.get_theme()
+            bg_color = theme.get('bg', self.background_color)
+            fg_color = theme.get('fg', '#FFFFFF')
+            results_window.configure(bg=bg_color)
+        else:
+            bg_color = self.background_color
+            fg_color = '#FFFFFF' if bg_color[1] < '5' else '#000000'
+        
+        # Create main frame
+        main_frame = tk.Frame(results_window, bg=bg_color)
+        main_frame.pack(fill=tk.BOTH, expand=True, padx=10, pady=10)
+        
+        # Create treeview for better display
+        from tkinter import ttk
+        
+        # Configure treeview style
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure("Treeview", 
+                       background=bg_color,
+                       foreground=fg_color,
+                       fieldbackground=bg_color,
+                       borderwidth=0)
+        style.configure("Treeview.Heading",
+                       background=bg_color,
+                       foreground=fg_color,
+                       borderwidth=1)
+        style.map('Treeview',
+                 background=[('selected', self.player_marker_color)],
+                 foreground=[('selected', '#FFFFFF')])
+        
+        # Create treeview with columns
+        columns = ('Item/NPC', 'Location', 'Zone', 'Last Seen')
+        tree = ttk.Treeview(main_frame, columns=columns, show='headings', height=20)
+        
+        # Define column headings and widths
+        tree.heading('Item/NPC', text='Item/NPC Name')
+        tree.heading('Location', text='Room')
+        tree.heading('Zone', text='Zone')
+        tree.heading('Last Seen', text='Last Seen')
+        
+        tree.column('Item/NPC', width=250)
+        tree.column('Location', width=200)
+        tree.column('Zone', width=150)
+        tree.column('Last Seen', width=150)
+        
+        # Add scrollbar
+        scrollbar = ttk.Scrollbar(main_frame, orient='vertical', command=tree.yview)
+        tree.configure(yscrollcommand=scrollbar.set)
+        scrollbar.pack(side=tk.RIGHT, fill=tk.Y)
+        
+        # Add results to treeview
+        item_data = []
+        for room_id, room_name, zone_name, item_name, last_seen in matches:
+            # Format timestamp
+            try:
+                from datetime import datetime
+                dt = datetime.fromisoformat(last_seen)
+                time_str = dt.strftime("%m/%d %H:%M")
+            except:
+                time_str = "Unknown"
+            
+            # Insert with item name first
+            tree.insert('', 'end', values=(item_name, room_name, zone_name, time_str))
+            item_data.append((room_id, zone_name, item_name))
+        
+        tree.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
+        
+        # Add info label
+        info_frame = tk.Frame(results_window, bg=bg_color)
+        info_frame.pack(fill=tk.X, pady=5)
+        
+        info_label = tk.Label(
+            info_frame,
+            text=f"Found {len(matches)} items/NPCs matching '{search_text}'. Double-click to go to location.",
+            bg=bg_color,
+            fg=fg_color,
+            font=('Consolas', 10)
+        )
+        info_label.pack()
+        
+        # Add selected item display
+        selected_label = tk.Label(
+            info_frame,
+            text="",
+            bg=bg_color,
+            fg=hover_color if 'hover_color' in locals() else '#FF6EC7',
+            font=('Consolas', 10, 'bold')
+        )
+        selected_label.pack(pady=2)
+        
+        def on_select(event):
+            """Update selected item display"""
+            selection = tree.selection()
+            if selection:
+                item = tree.item(selection[0])
+                values = item['values']
+                selected_label.config(text=f"Selected: {values[0]} in {values[1]}")
+        
+        # Handle double-click to go to room
+        def on_result_double_click(event):
+            selection = tree.selection()
+            if selection:
+                item = tree.item(selection[0])
+                index = tree.index(selection[0])
+                room_id, zone_name, item_name = item_data[index]
+                
+                # Get zone_id from zone_name
+                zone_id = self.zone_dict.get(zone_name)
+                if zone_id:
+                    print(f"[ITEM SEARCH] Going to room {room_id} for item '{item_name}'")
+                    # Display the zone and highlight the room
+                    self.current_level = 0
+                    self.display_zone(zone_id)
+                    self.this.after(100, lambda: self.highlight_room(str(room_id)))
+                    self.this.after(200, lambda: self.center_on_room(str(room_id)))
+                
+                # Close the search window
+                results_window.destroy()
+        
+        tree.bind('<<TreeviewSelect>>', on_select)
+        tree.bind('<Double-Button-1>', on_result_double_click)
+        
+        # Focus and select first item if exists
+        if len(matches) > 0:
+            first_item = tree.get_children()[0]
+            tree.selection_set(first_item)
+            tree.focus(first_item)
 
     def unhighlight_room(self, room_id):
         room_id = str(room_id)
@@ -644,6 +886,25 @@ class MapViewer:
         
         self.current_highlight = room_id
         self.current_room_id = room_id
+        
+        # Check if autowalking and position changed
+        if hasattr(self, 'autowalk_target') and self.autowalk_target:
+            if hasattr(self, 'autowalk_last_position'):
+                last_pos = self.autowalk_last_position
+                current_pos = int(room_id)
+                
+                if last_pos != current_pos:
+                    # Position changed successfully
+                    print(f"[AUTO-WALK] Moved from {last_pos} to {current_pos}")
+                    self.autowalk_waiting = False
+                    # Reset failed attempts since we made progress
+                    if hasattr(self, 'autowalk_failed_attempts'):
+                        self.autowalk_failed_attempts = {}
+                    # Continue walking after a short delay
+                    self.this.after(500, self.send_next_walk_command)
+                else:
+                    # Position didn't change - might have hit a wall
+                    print(f"[AUTO-WALK] Position unchanged at {current_pos}, might be blocked")
         
         # If no zone is displayed, we need to display it first
         if not self.displayed_zone_id:
@@ -830,6 +1091,10 @@ class MapViewer:
         if not hasattr(self, 'autowalk_target') or not self.autowalk_target:
             return
         
+        # Prevent sending commands too quickly
+        if hasattr(self, 'autowalk_waiting') and self.autowalk_waiting:
+            return
+        
         # Check current position
         if not hasattr(self, 'current_room_id') or not self.current_room_id:
             print("[AUTO-WALK] Lost position, stopping")
@@ -845,8 +1110,18 @@ class MapViewer:
             self.autowalk_target = None
             return
         
+        # Check if we're stuck trying the same thing
+        if hasattr(self, 'autowalk_failed_attempts'):
+            if self.autowalk_failed_attempts.get(current, 0) >= 3:
+                print(f"[AUTO-WALK] Failed 3 times from room {current}, giving up")
+                self.autowalk_target = None
+                self.autowalk_failed_attempts = {}
+                return
+        else:
+            self.autowalk_failed_attempts = {}
+        
         # Recalculate path from current position
-        print(f"[AUTO-WALK] Recalculating path from {current} to {target}")
+        print(f"[AUTO-WALK] Calculating path from {current} to {target}")
         path = self.find_path(current, target)
         
         if not path:
@@ -855,24 +1130,60 @@ class MapViewer:
             return
         
         if hasattr(self, 'parent') and hasattr(self.parent, 'connection'):
+            # Store the last position and command
+            self.autowalk_last_position = current
+            self.autowalk_last_command = path[0]
+            
             # Take the first step of the recalculated path
             command = path[0]
-            print(f"[AUTO-WALK] Next step: {command} (total path: {len(path)} steps)")
+            print(f"[AUTO-WALK] Sending: {command} (path length: {len(path)})")
+            
+            # Mark that we're waiting for position update
+            self.autowalk_waiting = True
             
             # Send the command
             self.parent.awaiting_response_for_command = True
             self.parent.last_command = command
             self.parent.connection.send(command)
             
-            # Schedule next recalculation after room update
-            # Increased delay to ensure position update completes
-            self.this.after(1000, self.send_next_walk_command)
+            # Set a timeout in case position never updates (e.g., hit a wall)
+            self.this.after(2000, self.check_autowalk_progress)
     
     def stop_autowalk(self):
         """Stop the current autowalk"""
         if hasattr(self, 'autowalk_target'):
             print(f"[AUTO-WALK] Stopped (was heading to room {self.autowalk_target})")
             self.autowalk_target = None
+            self.autowalk_waiting = False
+            self.autowalk_last_position = None
+            self.autowalk_failed_attempts = {}
+    
+    def check_autowalk_progress(self):
+        """Check if autowalk is stuck"""
+        if not hasattr(self, 'autowalk_waiting') or not self.autowalk_waiting:
+            return
+        
+        if hasattr(self, 'autowalk_last_position') and hasattr(self, 'current_room_id'):
+            current_pos = int(self.current_room_id)
+            if self.autowalk_last_position == current_pos:
+                # No movement happened
+                print(f"[AUTO-WALK] No progress from room {current_pos} using '{self.autowalk_last_command}'")
+                
+                # Track failed attempts from this position
+                if not hasattr(self, 'autowalk_failed_attempts'):
+                    self.autowalk_failed_attempts = {}
+                self.autowalk_failed_attempts[current_pos] = self.autowalk_failed_attempts.get(current_pos, 0) + 1
+                
+                self.autowalk_waiting = False
+                
+                # Try again if we haven't failed too many times
+                if hasattr(self, 'autowalk_target') and self.autowalk_target:
+                    if self.autowalk_failed_attempts[current_pos] < 3:
+                        print(f"[AUTO-WALK] Retry attempt {self.autowalk_failed_attempts[current_pos]}/3")
+                        self.this.after(500, self.send_next_walk_command)
+                    else:
+                        print(f"[AUTO-WALK] Too many failures, stopping")
+                        self.stop_autowalk()
     
     def on_right_click(self, event):
         """Handle right-click on map"""

@@ -325,17 +325,24 @@ class MainWindow:
             self.show_prompt()
         
         # Analyze for position if tracking is active
-        if self.awaiting_response_for_command and self.auto_walker.is_active():
-            # Clean message of prompts
-            clean_message = message.replace("> ", "").strip()
-            
-            # Check if this was a look command
-            is_look = hasattr(self, 'last_command') and self.last_command in ['l', 'look']
-            
-            # Process if it looks like a room description
-            if len(clean_message) > 80:
-                self.root.after(100, lambda: self.auto_walker.analyze_response(clean_message, is_look))
-                self.awaiting_response_for_command = False
+        if self.awaiting_response_for_command:
+            if not self.auto_walker.is_active():
+                print("[POSITION] AutoWalker is not active!")
+                self.auto_walker.toggle_active()  # Re-enable it
+            if self.auto_walker.is_active():
+                # Clean message of prompts
+                clean_message = message.replace("> ", "").strip()
+                
+                # Check if this was a look command
+                is_look = hasattr(self, 'last_command') and self.last_command in ['l', 'look']
+                
+                # Process if it looks like a room description
+                if len(clean_message) > 80:
+                    print(f"[POSITION] Analyzing response for command '{self.last_command}' (length: {len(clean_message)})")
+                    self.root.after(100, lambda: self.auto_walker.analyze_response(clean_message, is_look))
+                    self.awaiting_response_for_command = False
+                else:
+                    print(f"[POSITION] Response too short ({len(clean_message)} chars), waiting for more...")
 
     def setup_console_ui(self, console_frame):
         theme = self.theme_manager.get_theme()
@@ -385,11 +392,9 @@ class MainWindow:
             'cursor': 'hand2'
         }
         
-        # Level controls
-        self.level_up_btn = tk.Button(self.toolbar, text="▲ Level Up", command=self.level_up, width=12, **button_style)
-        self.level_up_btn.pack(side=tk.LEFT, padx=3, pady=5)
-        self.level_down_btn = tk.Button(self.toolbar, text="▼ Level Down", command=self.level_down, width=12, **button_style)
-        self.level_down_btn.pack(side=tk.LEFT, padx=3, pady=5)
+        # Let map viewer add its controls to the toolbar
+        if hasattr(self.map_viewer, 'add_map_controls_to_toolbar'):
+            self.map_viewer.add_map_controls_to_toolbar(self.toolbar)
         
         # Add theme switcher (no label)
         self.theme_selector = ttk.Combobox(self.toolbar, values=[name for _, name in self.theme_manager.get_theme_names()], 
@@ -399,12 +404,6 @@ class MainWindow:
         self.theme_selector.bind('<<ComboboxSelected>>', self.change_theme)
 
         self.toolbar.pack(side=tk.TOP, fill=tk.X, before=self.map_viewer.this)
-
-    def level_up(self):
-        self.map_viewer.change_level(1)
-
-    def level_down(self):
-        self.map_viewer.change_level(-1)
 
     def cycle_command_history_up(self, event):
         if self.command_history and self.input_start:
