@@ -1,4 +1,3 @@
-#camera.py
 class Camera:
     def __init__(self, canvas, initial_position=(0, 0), initial_zoom=1.0):
         self.canvas = canvas
@@ -42,4 +41,4 @@ class Camera:
         self.update_scroll_region()
 
     def log_current_position(self):
-        print(f"Camera Position (Center): X = {self.position[0]}, Y = {self.position[1]}")
+        pass

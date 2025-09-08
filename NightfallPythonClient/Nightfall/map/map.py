@@ -30,6 +30,8 @@ class MapViewer:
         self.current_level = 0
         self.scale = 1.0
         self.levels_dict = {}
+        self.has_found_position = False
+        self.last_zone_id = None
         self.load_config()
         
         # Apply theme if available
@@ -57,6 +59,7 @@ class MapViewer:
         
         # Bind right-click for room customization
         self.this.bind("<Button-3>", self.on_right_click)
+        self.this.bind("<Double-Button-1>", self.on_double_click)
 
         self.global_view_state = self.capture_current_view()
 
@@ -121,8 +124,20 @@ class MapViewer:
             self.note_color = theme['zone_note_color']
             self.player_marker_color = theme['room_highlight']
             self.connection_color = theme.get('connection_color', '#808080')
-            self.position_indicator_fill = theme.get('position_indicator', '#F5F5F520')
-            self.position_indicator_outline = theme.get('position_outline', '#E8E8E840')
+            # Calculate subtle crosshair color based on background
+            bg = theme['bg']
+            if bg.startswith('#'):
+                # Parse hex color and make it slightly different from background
+                r = int(bg[1:3], 16)
+                g = int(bg[3:5], 16)
+                b = int(bg[5:7], 16)
+                # Make it slightly lighter or darker
+                if (r + g + b) / 3 < 128:  # Dark background
+                    self.crosshair_color = f"#{min(255, r+40):02x}{min(255, g+40):02x}{min(255, b+40):02x}"
+                else:  # Light background
+                    self.crosshair_color = f"#{max(0, r-40):02x}{max(0, g-40):02x}{max(0, b-40):02x}"
+            else:
+                self.crosshair_color = "#888888"
 
     def fetch_zone_dict(self):
         zones = fetch_zones()
@@ -139,17 +154,15 @@ class MapViewer:
         exits_info = self.exits_with_zone_info([room[0] for room in rooms])
 
         self.draw_map(rooms, exits_info)
-        print(f"Display Zone: Zone ID = {zone_id}, Level = {self.current_level}")
 
 
     def change_level(self, delta):
-        print(f"Changing Level: Current Level = {self.current_level}, Delta = {delta}")
         new_level = self.current_level + delta
-
         self.current_level = new_level
         self.display_zone(self.displayed_zone_id)
+        # Always fit the map when changing levels
+        self.this.after(100, self.fit_and_center)
 
-        print(f"Level Change Complete: New Level = {self.current_level}")
 
     def capture_current_view(self):
         bbox = self.this.bbox("all")
@@ -174,7 +187,7 @@ class MapViewer:
                 dir_x, dir_y = calculate_direction(from_xy, to_xy)
                 detailed_exits_info.append((from_id, to_id, to_zone_id, dir_x, dir_y))
             else:
-                print(f"Position not found for from_id: {from_id} or to_id: {to_id}")
+                pass
         return detailed_exits_info
 
     def create_rounded_rectangle(self, x1, y1, x2, y2, radius=25, **kwargs):
@@ -311,6 +324,8 @@ class MapViewer:
             zone_id = self.zone_dict[zone_name]
             self.current_level = 0
             self.display_zone(zone_id)
+            # Always fit the map when changing zones manually
+            self.this.after(100, self.fit_and_center)
 
     def unhighlight_room(self, room_id):
         room_id = str(room_id)
@@ -322,39 +337,52 @@ class MapViewer:
             self.this.itemconfig(room_tag, fill=fill_color)
     
     def update_position_indicator(self, room_id):
-        """Add a very subtle circle around current position"""
-        # Remove old position indicator
+        """Add crosshair lines at current position"""
         self.this.delete("position_indicator")
         
-        # Find the room rectangle on canvas
         room_tag = f"{room_id}_room"
-        room_coords = self.this.bbox(room_tag)  # Use bbox for accurate bounds
+        room_coords = self.this.bbox(room_tag)
         
         if room_coords:
-            # Get exact center of room
             x = (room_coords[0] + room_coords[2]) / 2
             y = (room_coords[1] + room_coords[3]) / 2
             
-            # Smaller, more subtle circle
-            radius = 40
+            # Force update to get proper canvas bounds
+            self.this.update_idletasks()
             
-            # Very light, subtle circle
-            self.this.create_oval(
-                x - radius, y - radius,
-                x + radius, y + radius,
-                fill='',  # No fill, just outline
-                outline='#C0C0C0',  # Light grey outline
-                width=1,  # Thin line
-                dash=(5, 5),  # Dashed line for subtlety
+            # Get full canvas bounds
+            canvas_bbox = self.this.bbox("all")
+            if canvas_bbox:
+                min_x, min_y, max_x, max_y = canvas_bbox
+                # Extend well beyond visible area
+                min_x -= 5000
+                max_x += 5000
+                min_y -= 5000
+                max_y += 5000
+            else:
+                min_x, min_y = x - 10000, y - 10000
+                max_x, max_y = x + 10000, y + 10000
+            
+            # Use theme-aware color
+            color = getattr(self, 'crosshair_color', '#888888')
+            
+            self.this.create_line(
+                min_x, y,
+                max_x, y,
+                fill=color,
+                width=1,
                 tags=("position_indicator",)
             )
             
-            # Put it behind everything
-            self.this.tag_lower("position_indicator")
+            self.this.create_line(
+                x, min_y,
+                x, max_y,
+                fill=color,
+                width=1,
+                tags=("position_indicator",)
+            )
             
-            # Lower the indicator to be behind connections
             self.this.tag_lower("position_indicator")
-            # Make sure connections stay above indicator but below rooms
             self.this.tag_raise("connection", "position_indicator")
 
     def highlight_room(self, room_id):
@@ -368,19 +396,30 @@ class MapViewer:
         self.current_highlight = room_id
         self.current_room_id = room_id
         
+        # If no zone is displayed, we need to display it first
+        if not self.displayed_zone_id:
+            # Get the zone for this room and display it
+            from core.database import fetch_room_zone_id
+            zone_id = fetch_room_zone_id(room_id)
+            if zone_id:
+                self.display_zone(zone_id)
+        
         room_tag = f"{room_id}_room"
         # Check if the room exists on canvas before trying to highlight
         if self.this.find_withtag(room_tag):
             highlight_color = getattr(self, 'player_marker_color', '#FF6EC7')
             self.this.itemconfig(room_tag, fill=highlight_color)
-            # Add position indicator circle
             self.update_position_indicator(room_id)
-            print(f"[Map] Highlighted room {room_id}")
             
-            # NOW fit the map and center on player
-            self.fit_and_center()
-        else:
-            print(f"[Map] Room {room_id} not found on current display")
+            # Only auto-fit once per zone
+            zone_changed = (self.displayed_zone_id != self.last_zone_id)
+            first_position = not self.has_found_position
+            
+            if first_position or zone_changed:
+                # Delay to ensure everything is drawn
+                self.this.after(100, self.fit_and_center)
+                self.has_found_position = True
+                self.last_zone_id = self.displayed_zone_id
     
     def apply_theme(self, map_theme):
         """Apply a theme to the map"""
@@ -389,11 +428,43 @@ class MapViewer:
         self.note_color = map_theme['zone_note_color']
         self.player_marker_color = map_theme['room_highlight']
         self.connection_color = map_theme.get('connection_color', '#808080')
-        self.position_indicator_fill = map_theme.get('position_indicator', '#F5F5F520')
-        self.position_indicator_outline = map_theme.get('position_outline', '#E8E8E840')
+        
+        # Calculate subtle crosshair color based on background
+        bg = map_theme['bg']
+        if bg.startswith('#'):
+            r = int(bg[1:3], 16)
+            g = int(bg[3:5], 16)
+            b = int(bg[5:7], 16)
+            if (r + g + b) / 3 < 128:  # Dark background
+                self.crosshair_color = f"#{min(255, r+40):02x}{min(255, g+40):02x}{min(255, b+40):02x}"
+            else:  # Light background
+                self.crosshair_color = f"#{max(0, r-40):02x}{max(0, g-40):02x}{max(0, b-40):02x}"
+        else:
+            self.crosshair_color = "#888888"
         
         # Update canvas background
         self.this.config(bg=self.background_color)
+        
+        # Update existing items colors without redrawing
+        # Update all room colors
+        for item in self.this.find_withtag("room"):
+            tags = self.this.gettags(item)
+            # Skip highlighted room
+            if not any("_room" in tag and hasattr(self, 'current_highlight') and 
+                      tag == f"{self.current_highlight}_room" for tag in tags):
+                self.this.itemconfig(item, fill=self.room_color)
+        
+        # Update connection colors
+        for item in self.this.find_withtag("connection"):
+            self.this.itemconfig(item, fill=self.connection_color)
+        
+        # Update note colors
+        for item in self.this.find_withtag("note"):
+            self.this.itemconfig(item, fill=self.note_color)
+        
+        # Update crosshair color
+        for item in self.this.find_withtag("position_indicator"):
+            self.this.itemconfig(item, fill=self.crosshair_color)
         
         # Update zone listbox with theme
         if hasattr(self, 'zone_listbox'):
@@ -408,6 +479,60 @@ class MapViewer:
             # Update parent frame
             if self.zone_listbox.master:
                 self.zone_listbox.master.config(bg=self.background_color)
+    
+    def on_double_click(self, event):
+        clicked_item = self.this.find_overlapping(event.x, event.y, event.x, event.y)
+        for item in clicked_item:
+            tags = self.this.gettags(item)
+            for tag in tags:
+                if tag.endswith("_room"):
+                    target_room_id = int(tag.replace("_room", ""))
+                    self.pathfind_to_room(target_room_id)
+                    return
+    
+    def pathfind_to_room(self, target_room_id):
+        if not hasattr(self, 'current_room_id') or not self.current_room_id:
+            return
+        
+        current = int(self.current_room_id)
+        target = target_room_id
+        
+        if current == target:
+            return
+        
+        path = self.find_path(current, target)
+        if path:
+            self.execute_path(path)
+    
+    def find_path(self, start, end):
+        from collections import deque
+        from core.fast_database import get_database
+        
+        db = get_database()
+        queue = deque([(start, [])])
+        visited = {start}
+        
+        while queue:
+            current_room, path = queue.popleft()
+            
+            if current_room == end:
+                return path
+            
+            exits = db.get_exits_from_room(current_room)
+            for exit_info in exits:
+                next_room = exit_info["to"]
+                if next_room not in visited:
+                    visited.add(next_room)
+                    direction = exit_info.get("command") or exit_info.get("type", "unknown")
+                    new_path = path + [direction]
+                    queue.append((next_room, new_path))
+        
+        return None
+    
+    def execute_path(self, path):
+        if hasattr(self, 'parent') and hasattr(self.parent, 'connection'):
+            for command in path:
+                self.parent.connection.send(command)
     
     def on_right_click(self, event):
         """Handle right-click on map"""
@@ -457,7 +582,6 @@ class MapViewer:
             )
             
             if success:
-                print(f"[Customization] Saved customization for room {room_id}")
                 # Refresh the current zone to show changes
                 if self.displayed_zone_id:
                     self.display_zone(self.displayed_zone_id)
@@ -465,7 +589,7 @@ class MapViewer:
                     if hasattr(self, 'current_room_id') and self.current_room_id:
                         self.highlight_room(self.current_room_id)
             else:
-                print(f"[Customization] Failed to save customization for room {room_id}")
+                pass
     
     def center_view_on_bounds(self, min_x, min_y, max_x, max_y):
         """Just update scroll region - don't mess with zoom or position"""
@@ -487,52 +611,81 @@ class MapViewer:
         canvas_height = self.this.winfo_height()
         
         if canvas_width <= 1 or canvas_height <= 1:
+            # Try again after a short delay if canvas not ready
+            self.this.after(100, self.fit_and_center)
             return
         
-        # Calculate scale to fit all content
+        # Calculate content dimensions
         content_width = bbox[2] - bbox[0]
         content_height = bbox[3] - bbox[1]
         
         if content_width > 0 and content_height > 0:
-            scale_x = canvas_width / content_width
-            scale_y = canvas_height / content_height
-            scale = min(scale_x, scale_y) * 0.95  # 95% to have margin
+            # Calculate scale to fit all content
+            scale_x = (canvas_width * 0.95) / content_width
+            scale_y = (canvas_height * 0.95) / content_height
+            scale = min(scale_x, scale_y)
             
-            # Only scale if we need to zoom out
-            if scale < 1:
-                # Reset any previous scale
-                if hasattr(self, 'last_scale'):
-                    self.this.scale("all", 0, 0, 1/self.last_scale, 1/self.last_scale)
+            # Center point for scaling
+            center_x = (bbox[0] + bbox[2]) / 2
+            center_y = (bbox[1] + bbox[3]) / 2
+            
+            # Reset any previous scaling
+            self.this.scale("all", center_x, center_y, 1/self.camera.zoom, 1/self.camera.zoom)
+            
+            # Apply new scale from center
+            self.this.scale("all", center_x, center_y, scale, scale)
+            self.camera.zoom = scale
+            
+            # Move content to center of canvas
+            new_bbox = self.this.bbox("all")
+            if new_bbox:
+                # Calculate offset to center the map
+                offset_x = (canvas_width - (new_bbox[2] - new_bbox[0])) / 2 - new_bbox[0]
+                offset_y = (canvas_height - (new_bbox[3] - new_bbox[1])) / 2 - new_bbox[1]
                 
-                # Apply new scale
-                self.this.scale("all", 0, 0, scale, scale)
-                self.last_scale = scale
-                
-                # Update camera zoom
-                if hasattr(self, 'camera'):
-                    self.camera.zoom = scale
+                # Move all items to center
+                self.this.move("all", offset_x, offset_y)
         
-        # Set scroll region
-        new_bbox = self.this.bbox("all")
-        if new_bbox:
-            padding = 500
-            self.this.config(scrollregion=(new_bbox[0]-padding, new_bbox[1]-padding, 
-                                          new_bbox[2]+padding, new_bbox[3]+padding))
+        # Update scroll region after centering
+        final_bbox = self.this.bbox("all")
+        if final_bbox:
+            padding = 2000
+            self.this.config(scrollregion=(final_bbox[0]-padding, final_bbox[1]-padding, 
+                                          final_bbox[2]+padding, final_bbox[3]+padding))
+    
+    def center_on_room(self, room_id):
+        """Center the view on a specific room"""
+        room_tag = f"{room_id}_room"
+        room_coords = self.this.bbox(room_tag)
+        
+        if room_coords:
+            # Get room center
+            room_x = (room_coords[0] + room_coords[2]) / 2
+            room_y = (room_coords[1] + room_coords[3]) / 2
             
-            # Center on player position if we have one
-            if hasattr(self, 'current_room_id') and self.current_room_id:
-                room_pos = fetch_room_position(int(self.current_room_id))
-                if room_pos:
-                    # Apply scale to position
-                    x = room_pos[0] * (self.last_scale if hasattr(self, 'last_scale') else 1)
-                    y = room_pos[1] * (self.last_scale if hasattr(self, 'last_scale') else 1)
+            # Get canvas dimensions
+            canvas_width = self.this.winfo_width()
+            canvas_height = self.this.winfo_height()
+            
+            # Get scroll region
+            scroll_region = self.this.cget('scrollregion').split()
+            if len(scroll_region) == 4:
+                scroll_x1 = float(scroll_region[0])
+                scroll_y1 = float(scroll_region[1])
+                scroll_x2 = float(scroll_region[2])
+                scroll_y2 = float(scroll_region[3])
+                scroll_width = scroll_x2 - scroll_x1
+                scroll_height = scroll_y2 - scroll_y1
+                
+                # Calculate scroll positions to center the room
+                if scroll_width > 0 and scroll_height > 0:
+                    x_fraction = (room_x - scroll_x1 - canvas_width/2) / (scroll_width - canvas_width)
+                    y_fraction = (room_y - scroll_y1 - canvas_height/2) / (scroll_height - canvas_height)
                     
-                    # Calculate scroll to center on player
-                    scroll_width = new_bbox[2] - new_bbox[0] + 1000
-                    scroll_height = new_bbox[3] - new_bbox[1] + 1000
+                    # Clamp to valid range
+                    x_fraction = max(0, min(1, x_fraction))
+                    y_fraction = max(0, min(1, y_fraction))
                     
-                    scroll_x = (x - new_bbox[0] + 500 - canvas_width/2) / scroll_width
-                    scroll_y = (y - new_bbox[1] + 500 - canvas_height/2) / scroll_height
-                    
-                    self.this.xview_moveto(max(0, min(1, scroll_x)))
-                    self.this.yview_moveto(max(0, min(1, scroll_y)))
+                    # Apply scroll
+                    self.this.xview_moveto(x_fraction)
+                    self.this.yview_moveto(y_fraction)

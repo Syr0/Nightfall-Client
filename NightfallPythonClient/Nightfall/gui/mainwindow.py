@@ -89,22 +89,20 @@ class MainWindow:
 
     def on_login_success(self):
         self.login_mode = None
-        # Don't display login message - it interferes with commands
         
         # Save credentials if they were entered manually
         if self.entered_username and not self.connection.user:
             # Get password from input if it was just entered
             self.connection.save_credentials(self.entered_username, self.connection.password or '')
         
-        # Delay look command slightly to let login messages pass
+        # Send look command after login
         def send_look():
-            print("[Login] Sending automatic 'look' command")
             self.awaiting_response_for_command = True
-            self.last_command = 'look'
-            self.connection.send('look')
+            self.last_command = 'l'
+            self.connection.send('l')
         
-        # Small delay to let login messages clear
-        self.root.after(500, send_look)
+        # Small delay to let login messages pass
+        self.root.after(1000, send_look)
         
         # Execute initial commands if configured
         if self.config.has_option('InitialCommands', 'commands'):
@@ -177,9 +175,10 @@ class MainWindow:
                     self.connection.save_credentials(self.entered_username, input_text)
             else:
                 # Normal command mode
-                if any(cmd for cmd in self.trigger_commands if input_text.split() and cmd.startswith(input_text.split()[0])):
+                first_word = input_text.split()[0] if input_text.split() else ""
+                if first_word and any(cmd == first_word for cmd in self.trigger_commands):
                     self.awaiting_response_for_command = True
-                    self.last_command = input_text.split()[0]
+                    self.last_command = first_word
                 self.connection.send(input_text)
                 self.command_history.append(input_text)
                 self.command_history_index = -1
@@ -277,7 +276,6 @@ class MainWindow:
         # Only apply if similarity is high enough (already filtered in positionfinder)
         if highlight_info and highlight_info.get('similarity', 0) >= 0.9:
             self.highlight_info = highlight_info
-            print(f"[Highlight] Applying highlight with {highlight_info['similarity']:.1%} similarity")
         else:
             self.highlight_info = None  # Clear highlighting for poor matches
 
@@ -326,17 +324,18 @@ class MainWindow:
             self.text_area.insert("end", "\n")
             self.show_prompt()
         
-        # Always analyze for position if tracking is active
+        # Analyze for position if tracking is active
         if self.awaiting_response_for_command and self.auto_walker.is_active():
-            # Check if this was a look command and message is long enough to be a room description
+            # Clean message of prompts
+            clean_message = message.replace("> ", "").strip()
+            
+            # Check if this was a look command
             is_look = hasattr(self, 'last_command') and self.last_command in ['l', 'look']
-            # Only process if it's a real room description (not login messages)
-            if len(message) > 150 or 'There' in message and 'exit' in message:
-                # Give the response analyzer the full message for better matching
-                self.root.after(100, lambda: self.auto_walker.analyze_response(message, is_look))
+            
+            # Process if it looks like a room description
+            if len(clean_message) > 80:
+                self.root.after(100, lambda: self.auto_walker.analyze_response(clean_message, is_look))
                 self.awaiting_response_for_command = False
-            elif is_look:
-                print(f"[Position] Ignoring short response ({len(message)} chars) - not a room description")
 
     def setup_console_ui(self, console_frame):
         theme = self.theme_manager.get_theme()
@@ -458,9 +457,6 @@ class MainWindow:
         # Update map if exists
         if hasattr(self, 'map_viewer'):
             self.map_viewer.apply_theme(theme['map'])
-            # Redraw current zone
-            if self.map_viewer.displayed_zone_id:
-                self.map_viewer.display_zone(self.map_viewer.displayed_zone_id)
     
     def cycle_command_history_down(self, event):
         if self.command_history and self.input_start:
