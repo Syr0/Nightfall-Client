@@ -729,6 +729,67 @@ class MapViewer:
                 results_window.destroy()
         
         listbox.bind('<Double-Button-1>', on_result_double_click)
+        
+        # Add right-click context menu for deletion
+        def on_right_click(event):
+            # Get the item under the cursor
+            index = listbox.nearest(event.y)
+            if 0 <= index < listbox.size():
+                listbox.selection_clear(0, tk.END)
+                listbox.selection_set(index)
+                listbox.activate(index)
+                
+                # Create context menu
+                context_menu = tk.Menu(results_window, tearoff=0)
+                context_menu.configure(bg=bg_color, fg=fg_color, 
+                                     activebackground=self.player_marker_color,
+                                     activeforeground='#FFFFFF')
+                
+                def delete_room():
+                    room_id, zone_name = room_data[index]
+                    room_name = matches[index][1]
+                    
+                    # Confirmation dialog
+                    from tkinter import messagebox
+                    if messagebox.askyesno("Confirm Delete", 
+                                          f"Are you sure you want to delete this room?\n\n"
+                                          f"Room: {room_name}\n"
+                                          f"Zone: {zone_name}\n"
+                                          f"ID: {room_id}\n\n"
+                                          f"This action cannot be undone!",
+                                          parent=results_window):
+                        # Delete from database
+                        db = _db
+                        if db.delete_room(room_id):
+                            # Remove from listbox
+                            listbox.delete(index)
+                            room_data.pop(index)
+                            matches.pop(index)
+                            
+                            # Update info label
+                            info_label.config(text=f"Found {len(matches)} rooms. Double-click to go to room.")
+                            
+                            # Refresh map if this room is in current zone
+                            if self.displayed_zone_id:
+                                room_zone = db.get_room_zone(room_id)
+                                if room_zone == self.displayed_zone_id:
+                                    self.display_zone(self.displayed_zone_id)
+                            
+                            messagebox.showinfo("Success", f"Room '{room_name}' deleted successfully.", 
+                                              parent=results_window)
+                        else:
+                            messagebox.showerror("Error", "Failed to delete room from database.", 
+                                               parent=results_window)
+                
+                context_menu.add_command(label="Delete Room", command=delete_room)
+                context_menu.add_separator()
+                context_menu.add_command(label="Cancel", command=context_menu.destroy)
+                
+                # Show menu at cursor position
+                context_menu.post(event.x_root, event.y_root)
+        
+        listbox.bind('<Button-3>', on_right_click)  # Right-click on Windows/Linux
+        listbox.bind('<Button-2>', on_right_click)  # Middle-click as alternative
     
     def show_item_search_dialog(self):
         """Show dialog to search for items/NPCs"""
@@ -919,6 +980,105 @@ class MapViewer:
         tree.bind('<<TreeviewSelect>>', on_select)
         tree.bind('<Double-Button-1>', on_result_double_click)
         
+        # Add right-click context menu for deletion
+        def on_right_click(event):
+            # Get the item under cursor
+            item_id = tree.identify_row(event.y)
+            if item_id:
+                tree.selection_set(item_id)
+                index = tree.index(item_id)
+                
+                # Create context menu
+                context_menu = tk.Menu(results_window, tearoff=0)
+                context_menu.configure(bg=bg_color, fg=fg_color,
+                                     activebackground=self.player_marker_color,
+                                     activeforeground='#FFFFFF')
+                
+                def delete_item():
+                    room_id, zone_name, item_name = item_data[index]
+                    item_values = tree.item(item_id)['values']
+                    room_name = item_values[1]
+                    
+                    # Confirmation dialog
+                    from tkinter import messagebox
+                    if messagebox.askyesno("Confirm Delete",
+                                          f"Are you sure you want to delete this item/NPC record?\n\n"
+                                          f"Item/NPC: {item_name}\n"
+                                          f"Room: {room_name}\n"
+                                          f"Zone: {zone_name}\n\n"
+                                          f"This will remove it from the room's item/NPC list.\n"
+                                          f"This action cannot be undone!",
+                                          parent=results_window):
+                        # Delete from database
+                        import json
+                        
+                        # Load current data
+                        try:
+                            # Check if it's in items or NPCs
+                            with open('data/room_items.json', 'r') as f:
+                                items_data = json.load(f)
+                            with open('data/room_npcs.json', 'r') as f:
+                                npcs_data = json.load(f)
+                            
+                            deleted = False
+                            room_key = str(room_id)
+                            
+                            # Try to delete from items
+                            if room_key in items_data:
+                                items_list = items_data[room_key].get('items', [])
+                                if item_name in items_list:
+                                    items_list.remove(item_name)
+                                    if not items_list:
+                                        del items_data[room_key]
+                                    else:
+                                        items_data[room_key]['items'] = items_list
+                                    
+                                    with open('data/room_items.json', 'w') as f:
+                                        json.dump(items_data, f, indent=2)
+                                    deleted = True
+                            
+                            # Try to delete from NPCs if not found in items
+                            if not deleted and room_key in npcs_data:
+                                npcs_list = npcs_data[room_key].get('npcs', [])
+                                if item_name in npcs_list:
+                                    npcs_list.remove(item_name)
+                                    if not npcs_list:
+                                        del npcs_data[room_key]
+                                    else:
+                                        npcs_data[room_key]['npcs'] = npcs_list
+                                    
+                                    with open('data/room_npcs.json', 'w') as f:
+                                        json.dump(npcs_data, f, indent=2)
+                                    deleted = True
+                            
+                            if deleted:
+                                # Remove from treeview
+                                tree.delete(item_id)
+                                item_data.pop(index)
+                                matches.pop(index)
+                                
+                                # Update info label
+                                info_label.config(text=f"Found {len(matches)} items/NPCs matching '{search_text}'. Double-click to go to location.")
+                                
+                                messagebox.showinfo("Success", f"'{item_name}' removed from room successfully.",
+                                                  parent=results_window)
+                            else:
+                                messagebox.showerror("Error", "Item/NPC not found in database.",
+                                                   parent=results_window)
+                        except Exception as e:
+                            messagebox.showerror("Error", f"Failed to delete: {str(e)}",
+                                               parent=results_window)
+                
+                context_menu.add_command(label="Delete Item/NPC", command=delete_item)
+                context_menu.add_separator()
+                context_menu.add_command(label="Cancel", command=context_menu.destroy)
+                
+                # Show menu at cursor position
+                context_menu.post(event.x_root, event.y_root)
+        
+        tree.bind('<Button-3>', on_right_click)  # Right-click on Windows/Linux
+        tree.bind('<Button-2>', on_right_click)  # Middle-click as alternative
+        
         # Focus and select first item if exists
         if len(matches) > 0:
             first_item = tree.get_children()[0]
@@ -1039,6 +1199,33 @@ class MapViewer:
             player_zone = fetch_room_zone_id(room_id)
             if player_zone:
                 self.mark_player_zone_in_list(player_zone)
+    
+    def update_toolbar_canvas_colors(self, canvas, toolbar_theme):
+        """Update colors of toolbar canvas icons when theme changes"""
+        fg_color = toolbar_theme['fg']
+        hover_color = toolbar_theme.get('button_active', '#FF6EC7')
+        
+        # Update all items in the canvas
+        for item in canvas.find_all():
+            item_type = canvas.type(item)
+            try:
+                if item_type in ['oval', 'rectangle', 'polygon']:
+                    # Check if it's a filled shape or just outline
+                    current_fill = canvas.itemcget(item, 'fill')
+                    current_outline = canvas.itemcget(item, 'outline')
+                    
+                    # Update outline color if it has one
+                    if current_outline and current_outline != '':
+                        canvas.itemconfig(item, outline=fg_color)
+                    
+                    # Update fill if it's not the background color
+                    if current_fill and current_fill != '' and current_fill not in [self.background_color, toolbar_theme['bg']]:
+                        # This is likely a highlighted element, use hover color
+                        canvas.itemconfig(item, fill=hover_color if current_fill != self.room_color else fg_color)
+                elif item_type == 'line':
+                    canvas.itemconfig(item, fill=fg_color)
+            except tk.TclError:
+                pass
     
     def apply_theme(self, map_theme):
         """Apply a theme to the map"""

@@ -225,6 +225,62 @@ class FastDatabase:
             "descriptions": len(self.data["descriptions_index"]),
             "loaded": self.loaded
         }
+    
+    def delete_room(self, room_id):
+        """Delete a room from the database"""
+        try:
+            room_id_str = str(room_id)
+            
+            # Check if room exists
+            if room_id_str not in self.data["rooms"]:
+                return False
+            
+            # Delete the room
+            del self.data["rooms"][room_id_str]
+            
+            # Delete exits from this room
+            if room_id_str in self.data["exits"]:
+                del self.data["exits"][room_id_str]
+            
+            # Delete exits TO this room from other rooms
+            for from_room, exits in list(self.data["exits"].items()):
+                # Remove any exits that lead to the deleted room
+                self.data["exits"][from_room] = {
+                    direction: to_room 
+                    for direction, to_room in exits.items() 
+                    if str(to_room) != room_id_str
+                }
+                # Clean up empty exit dicts
+                if not self.data["exits"][from_room]:
+                    del self.data["exits"][from_room]
+            
+            # Remove from zone rooms list
+            for zone_id, zone_data in self.data["zones"].items():
+                if "rooms" in zone_data and room_id_str in zone_data["rooms"]:
+                    zone_data["rooms"].remove(room_id_str)
+            
+            # Remove from descriptions index if present
+            if room_id_str in self.data["descriptions_index"]:
+                desc = self.data["descriptions_index"][room_id_str]
+                if desc in self.data["descriptions"]:
+                    rooms_with_desc = self.data["descriptions"][desc]
+                    if room_id_str in rooms_with_desc:
+                        rooms_with_desc.remove(room_id_str)
+                    # Clean up empty description lists
+                    if not rooms_with_desc:
+                        del self.data["descriptions"][desc]
+                del self.data["descriptions_index"][room_id_str]
+            
+            # Save changes back to file
+            import json
+            with open(self.db_file, 'w') as f:
+                json.dump(self.data, f, indent=2)
+            
+            return True
+            
+        except Exception as e:
+            print(f"Error deleting room {room_id}: {e}")
+            return False
 
 # Global instance for easy access
 _db_instance = None

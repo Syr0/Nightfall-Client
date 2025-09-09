@@ -522,6 +522,38 @@ class MainWindow:
             'activeforeground': toolbar_theme['fg'],
         }
         
+        # Update all toolbar children
+        for child in self.toolbar.winfo_children():
+            if isinstance(child, tk.Button):
+                child.config(**button_style)
+            elif isinstance(child, tk.Label):
+                child.config(bg=toolbar_theme['bg'], fg=toolbar_theme['fg'])
+            elif isinstance(child, tk.Frame):
+                # Separators
+                child.config(bg=toolbar_theme['fg'])
+            elif isinstance(child, tk.Canvas):
+                # Update canvas backgrounds and redraw
+                child.config(bg=toolbar_theme['bg'])
+                # Need to update the drawn elements too
+                if hasattr(self, 'map_viewer'):
+                    self.map_viewer.update_toolbar_canvas_colors(child, toolbar_theme)
+        
+        # Style the theme selector combobox
+        style = ttk.Style()
+        style.theme_use('clam')
+        style.configure('TCombobox',
+                       fieldbackground=toolbar_theme['button_bg'],
+                       background=toolbar_theme['button_bg'],
+                       foreground=toolbar_theme['button_fg'],
+                       arrowcolor=toolbar_theme['button_fg'],
+                       bordercolor=toolbar_theme['fg'],
+                       lightcolor=toolbar_theme['button_bg'],
+                       darkcolor=toolbar_theme['button_bg'])
+        style.map('TCombobox',
+                 fieldbackground=[('readonly', toolbar_theme['button_bg'])],
+                 selectbackground=[('readonly', toolbar_theme['button_active'])],
+                 selectforeground=[('readonly', toolbar_theme['fg'])])
+        
         # Update map if exists
         if hasattr(self, 'map_viewer'):
             self.map_viewer.apply_theme(theme['map'])
