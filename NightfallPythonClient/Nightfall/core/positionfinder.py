@@ -39,6 +39,7 @@ class AutoWalker:
             # Display new zone or redisplay current zone if level changed
             if zone_changing:
                 self.map_viewer.display_zone(new_zone_id)
+                # Camera state will be restored automatically or fit to content
             elif z_level != self.map_viewer.current_level and self.map_viewer.displayed_zone_id:
                 # Level changed within same zone
                 self.map_viewer.display_zone(self.map_viewer.displayed_zone_id)
@@ -85,9 +86,9 @@ class AutoWalker:
             print(f"[POSITION] Found matching room: {best_match}")
             
             # Extract items/NPCs from the response
-            items = self._extract_items(response)
-            if items:
-                self._save_room_items(best_match, items)
+            entities = self._extract_items_and_npcs(response)
+            if entities['items'] or entities['npcs']:
+                self._save_room_entities(best_match, entities)
             
             if is_look_command:
                 try:
@@ -411,12 +412,15 @@ class AutoWalker:
             'similarity': len(matches) / max(m, n) if max(m, n) > 0 else 0
         }
     
-    def _extract_items(self, response):
-        """Extract items and NPCs from room description"""
+    def _extract_items_and_npcs(self, response):
+        """Extract items and NPCs from room description, distinguishing by ANSI codes"""
         import re
         
-        # Split response into lines
-        lines = response.split('\n')
+        # Keep original with ANSI codes to detect NPCs vs items
+        lines_with_ansi = response.split('\n')
+        # Also get clean lines for text extraction
+        ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
+        lines = [ansi_escape.sub('', line) for line in lines_with_ansi]
         
         # Find where exits line is (items/NPCs come after)
         exit_line_idx = -1
@@ -429,21 +433,88 @@ class AutoWalker:
             return []
         
         items = []
+        npcs = []
+        
         # Look at lines after the exit line
-        for i in range(exit_line_idx + 1, len(lines)):
+        i = exit_line_idx + 1
+        while i < len(lines):
             line = lines[i].strip()
+            line_with_ansi = lines_with_ansi[i].strip() if i < len(lines_with_ansi) else ""
             
             # Skip empty lines
             if not line:
+                i += 1
                 continue
             
             # Skip prompt lines
             if line.startswith('>') or line == '>' or '> ' in line:
+                i += 1
                 continue
-                
-            # Clean ANSI codes if present
-            ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
-            line = ansi_escape.sub('', line)
+            
+            # Check if this line is incomplete (doesn't end with period and is short)
+            # This likely means it was split mid-word
+            if not line.endswith('.') and len(line) < 20:
+                # Check if next line exists and looks like a continuation
+                if i + 1 < len(lines):
+                    next_line = lines[i + 1].strip()
+                    next_line_with_ansi = lines_with_ansi[i + 1].strip() if i + 1 < len(lines_with_ansi) else ""
+                    
+                    # If next line starts with lowercase or is a continuation, combine them
+                    if next_line and (next_line[0].islower() or next_line.startswith('rd,')):
+                        print(f"[DEBUG] Combining split lines: '{line}' + '{next_line}'")
+                        # Combine the lines
+                        line = line + next_line
+                        line_with_ansi = line_with_ansi + next_line_with_ansi
+                        # Skip the next line since we combined it
+                        i += 1
+            
+            # Check if it's an NPC (bold+35 or direct 95) or item (35)
+            # Need to check for both [1;35m and [35;1m patterns, as well as [95m
+            is_npc = False
+            has_purple = False
+            
+            # Debug: Show exact ANSI codes in the line
+            import re
+            ansi_codes = re.findall(r'\x1b\[[0-9;]*m', line_with_ansi)
+            if ansi_codes and ('35' in str(ansi_codes) or '95' in str(ansi_codes)):
+                print(f"[DEBUG] Full line: '{line}'")
+                print(f"[DEBUG] Line length: {len(line)}, ends with period: {line.endswith('.')}")
+                print(f"[DEBUG] ANSI codes found: {ansi_codes}")
+            
+            # Check if line has both bold AND magenta (NPCs)
+            # Server sends them as separate sequences: [1m][35m] not [1;35m]
+            has_bold = '\x1b[1m' in line_with_ansi
+            has_magenta = '\x1b[35m' in line_with_ansi or '\x1b[0;35m' in line_with_ansi
+            has_bright_magenta = '\x1b[95m' in line_with_ansi
+            
+            if has_bold and has_magenta:
+                # Bold + Magenta = NPC
+                is_npc = True
+                has_purple = True
+                print(f"[DEBUG] Detected as NPC (bold + magenta separate)")
+            elif has_bright_magenta:
+                # Direct bright magenta = NPC
+                is_npc = True
+                has_purple = True
+                print(f"[DEBUG] Detected as NPC (bright magenta)")
+            elif has_magenta and not has_bold:
+                # Just magenta without bold = Item
+                is_npc = False
+                has_purple = True
+                print(f"[DEBUG] Detected as ITEM (plain magenta, no bold)")
+            # elif '\x1b[35m' in line_with_ansi:  # This is redundant now
+                # Need to make sure it's not part of [1;35m or [35;1]
+                # Check if 35 appears without bold
+                import re
+                # Look for [35m or sequences like [0;35m but not [1;35m or [35;1]
+                if re.search(r'\x1b\[(?:0;)?35m', line_with_ansi) and not re.search(r'\x1b\[(?:1;35|35;1)m', line_with_ansi):
+                    is_npc = False
+                    has_purple = True
+                    print(f"[DEBUG] Detected as ITEM (plain magenta)")
+            
+            if not has_purple:
+                # No purple color, skip
+                continue
             
             # Common patterns for items/NPCs:
             # "A stone obelisk with an inscription."
@@ -454,67 +525,100 @@ class AutoWalker:
             if len(line) > 100:
                 continue
             
-            # If line ends with period and doesn't look like exits, it's likely an item
-            if line.endswith('.'):
-                # Remove the period
-                item_name = line[:-1].strip()
+            # Extract entity name - NPCs might not end with period
+            entity_name = line.strip()
+            
+            # Remove period if present
+            if entity_name.endswith('.'):
+                entity_name = entity_name[:-1].strip()
+            
+            # Clean up common prefixes
+            if entity_name.lower().startswith('a '):
+                entity_name = entity_name[2:]
+            elif entity_name.lower().startswith('an '):
+                entity_name = entity_name[3:]
+            elif entity_name.lower().startswith('the '):
+                entity_name = entity_name[4:]
                 
-                # Clean up common prefixes
-                if item_name.lower().startswith('a '):
-                    item_name = item_name[2:]
-                elif item_name.lower().startswith('an '):
-                    item_name = item_name[3:]
-                elif item_name.lower().startswith('the '):
-                    item_name = item_name[4:]
-                    
-                if item_name:
-                    items.append(item_name)
-                    print(f"[POSITION] Found item/NPC: {item_name}")
+            if entity_name:
+                if is_npc:
+                    npcs.append(entity_name)
+                    print(f"[POSITION] Found NPC: {entity_name}")
+                else:
+                    items.append(entity_name)
+                    print(f"[POSITION] Found item: {entity_name}")
+            
+            # Move to next line
+            i += 1
         
-        return items
+        return {'items': items, 'npcs': npcs}
     
-    def _save_room_items(self, room_id, items):
-        """Save items to the room data"""
+    def _save_room_entities(self, room_id, entities):
+        """Save items and NPCs to separate databases"""
         import json
         import os
         from datetime import datetime
         
-        # Load or create items database
-        items_file = os.path.join(os.path.dirname(__file__), '../data/room_items.json')
-        
-        try:
-            if os.path.exists(items_file):
-                with open(items_file, 'r', encoding='utf-8') as f:
-                    items_data = json.load(f)
-            else:
-                items_data = {}
-        except Exception as e:
-            print(f"[POSITION] Error loading items data: {e}")
-            items_data = {}
-        
-        # Update room items
-        room_key = str(room_id)
-        if room_key not in items_data:
-            items_data[room_key] = {
-                'items': [],
-                'last_seen': {}
-            }
-        
-        # Update items with timestamp
         current_time = datetime.now().isoformat()
-        for item in items:
-            if item not in items_data[room_key]['items']:
-                items_data[room_key]['items'].append(item)
-            items_data[room_key]['last_seen'][item] = current_time
+        room_key = str(room_id)
         
-        # Save back to file
-        try:
-            os.makedirs(os.path.dirname(items_file), exist_ok=True)
-            with open(items_file, 'w', encoding='utf-8') as f:
-                json.dump(items_data, f, indent=2, ensure_ascii=False)
-            print(f"[POSITION] Saved {len(items)} items for room {room_id}")
-        except Exception as e:
-            print(f"[POSITION] Error saving items data: {e}")
+        # Save items to items database
+        if entities['items']:
+            items_file = os.path.join(os.path.dirname(__file__), '../data/room_items.json')
+            try:
+                if os.path.exists(items_file):
+                    with open(items_file, 'r', encoding='utf-8') as f:
+                        items_data = json.load(f)
+                else:
+                    items_data = {}
+            except Exception as e:
+                print(f"[POSITION] Error loading items data: {e}")
+                items_data = {}
+            
+            if room_key not in items_data:
+                items_data[room_key] = {'items': [], 'last_seen': {}}
+            
+            for item in entities['items']:
+                if item not in items_data[room_key]['items']:
+                    items_data[room_key]['items'].append(item)
+                items_data[room_key]['last_seen'][item] = current_time
+            
+            try:
+                os.makedirs(os.path.dirname(items_file), exist_ok=True)
+                with open(items_file, 'w', encoding='utf-8') as f:
+                    json.dump(items_data, f, indent=2, ensure_ascii=False)
+                print(f"[POSITION] Saved {len(entities['items'])} items for room {room_id}")
+            except Exception as e:
+                print(f"[POSITION] Error saving items data: {e}")
+        
+        # Save NPCs to NPCs database
+        if entities['npcs']:
+            npcs_file = os.path.join(os.path.dirname(__file__), '../data/room_npcs.json')
+            try:
+                if os.path.exists(npcs_file):
+                    with open(npcs_file, 'r', encoding='utf-8') as f:
+                        npcs_data = json.load(f)
+                else:
+                    npcs_data = {}
+            except Exception as e:
+                print(f"[POSITION] Error loading NPCs data: {e}")
+                npcs_data = {}
+            
+            if room_key not in npcs_data:
+                npcs_data[room_key] = {'npcs': [], 'last_seen': {}}
+            
+            for npc in entities['npcs']:
+                if npc not in npcs_data[room_key]['npcs']:
+                    npcs_data[room_key]['npcs'].append(npc)
+                npcs_data[room_key]['last_seen'][npc] = current_time
+            
+            try:
+                os.makedirs(os.path.dirname(npcs_file), exist_ok=True)
+                with open(npcs_file, 'w', encoding='utf-8') as f:
+                    json.dump(npcs_data, f, indent=2, ensure_ascii=False)
+                print(f"[POSITION] Saved {len(entities['npcs'])} NPCs for room {room_id}")
+            except Exception as e:
+                print(f"[POSITION] Error saving NPCs data: {e}")
     
     def _map_to_original_positions(self, original, clean, clean_positions):
         try:

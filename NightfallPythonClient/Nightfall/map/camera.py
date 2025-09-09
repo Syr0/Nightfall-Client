@@ -1,9 +1,15 @@
+import json
+import os
+
 class Camera:
     def __init__(self, canvas, initial_position=(0, 0), initial_zoom=1.0):
         self.canvas = canvas
         self.position = initial_position
         self.zoom = initial_zoom
         self.start_pan_pos = None
+        self.zone_states = {}  # Store camera state per zone
+        self.states_file = os.path.join(os.path.dirname(__file__), '../data/camera_states.json')
+        self.load_states_from_file()
 
         self.canvas.bind("<Button-2>", self.start_pan)
         self.canvas.bind("<B2-Motion>", self.on_pan)
@@ -21,17 +27,33 @@ class Camera:
         dy = (self.start_pan_pos[1] - event.y) / self.zoom
         self.position = (self.position[0] + dx, self.position[1] + dy)
         self.start_pan_pos = (event.x, event.y)
+        
+        # Auto-save camera state when panning if we have a zone
+        if hasattr(self, 'current_zone_id') and self.current_zone_id:
+            # Throttle saves - only save after pan is done
+            if hasattr(self, '_save_timer'):
+                self.canvas.after_cancel(self._save_timer)
+            self._save_timer = self.canvas.after(500, lambda: self.save_zone_state(self.current_zone_id))
 
     def on_zoom(self, event):
         x = self.canvas.canvasx(event.x)
         y = self.canvas.canvasy(event.y)
         factor = 1.001 ** event.delta
         new_zoom = self.zoom * factor
+        
+        # Allow much wider zoom range
+        new_zoom = max(0.001, min(50.0, new_zoom))
 
         relative_factor = new_zoom / self.zoom
         self.zoom = new_zoom
         self.canvas.scale("all", x, y, relative_factor, relative_factor)
         self.update_scroll_region()
+        
+        print(f"[CAMERA] Zoom changed to {self.zoom:.6f}")
+        
+        # Auto-save camera state when zooming if we have a zone
+        if hasattr(self, 'current_zone_id') and self.current_zone_id:
+            self.save_zone_state(self.current_zone_id)
 
     def update_scroll_region(self):
         self.canvas.configure(scrollregion=self.canvas.bbox("all"))
@@ -42,6 +64,92 @@ class Camera:
 
     def log_current_position(self):
         pass
+    
+    def save_zone_state(self, zone_id):
+        """Save current camera state for a zone"""
+        if zone_id:
+            # Get current view position
+            x1 = self.canvas.canvasx(0)
+            y1 = self.canvas.canvasy(0)
+            self.zone_states[zone_id] = {
+                'zoom': self.zoom,
+                'view_x': x1,
+                'view_y': y1,
+                'position': self.position
+            }
+            print(f"[CAMERA] Saved state for {zone_id}: zoom={self.zoom:.6f}, view=({x1:.0f},{y1:.0f})")
+            # Also save to file for persistence
+            self.save_states_to_file()
+    
+    def restore_zone_state(self, zone_id):
+        """Restore camera state for a zone"""
+        if zone_id and zone_id in self.zone_states:
+            state = self.zone_states[zone_id]
+            
+            # IMPORTANT: Clear ALL transformations first
+            self.canvas.delete("all")  # This will be redrawn by caller
+            
+            # Set zoom directly without any scaling first
+            saved_zoom = state['zoom']
+            # Allow wider range but sanity check
+            saved_zoom = max(0.001, min(50.0, saved_zoom))
+            self.zoom = saved_zoom
+            
+            # Position will be set by the caller after drawing
+            self.position = state.get('position', (0, 0))
+            
+            # Store the view position to restore after drawing
+            self.pending_view_x = state.get('view_x', 0)
+            self.pending_view_y = state.get('view_y', 0)
+            
+            print(f"[CAMERA] Will restore state for {zone_id}: zoom={self.zoom:.6f}, view=({self.pending_view_x:.0f},{self.pending_view_y:.0f})")
+            return True
+        else:
+            print(f"[CAMERA] No saved state for {zone_id}, starting with zoom=1.0")
+            # Reset to default zoom when no state
+            self.zoom = 1.0
+            self.position = (0, 0)
+        return False
+    
+    def apply_pending_view(self):
+        """Apply pending view position after map is drawn"""
+        if hasattr(self, 'pending_view_x') and hasattr(self, 'pending_view_y'):
+            # Apply the zoom to all new items
+            if self.zoom != 1.0:
+                self.canvas.scale("all", 0, 0, self.zoom, self.zoom)
+            
+            # Restore view position
+            self.canvas.xview_moveto(0)
+            self.canvas.yview_moveto(0)
+            self.canvas.scan_mark(0, 0)
+            self.canvas.scan_dragto(int(-self.pending_view_x), int(-self.pending_view_y), gain=1)
+            
+            # Clear pending
+            del self.pending_view_x
+            del self.pending_view_y
+            
+            self.update_scroll_region()
+            print(f"[CAMERA] Applied pending view state")
+    
+    def save_states_to_file(self):
+        """Save all zone camera states to file"""
+        try:
+            os.makedirs(os.path.dirname(self.states_file), exist_ok=True)
+            with open(self.states_file, 'w') as f:
+                json.dump(self.zone_states, f, indent=2)
+        except Exception as e:
+            print(f"[CAMERA] Could not save states: {e}")
+    
+    def load_states_from_file(self):
+        """Load zone camera states from file"""
+        try:
+            if os.path.exists(self.states_file):
+                with open(self.states_file, 'r') as f:
+                    self.zone_states = json.load(f)
+                print(f"[CAMERA] Loaded {len(self.zone_states)} zone states")
+        except Exception as e:
+            print(f"[CAMERA] Could not load states: {e}")
+            self.zone_states = {}
     
     def center_on_point(self, x, y):
         """Center the view on a specific point"""

@@ -7,16 +7,24 @@
       "Marcel, the butcher",
       "butcher's cart",
       "Corpse of Marvin",
-      "Zipp, Zap's white quarter warhorse"
+      "Zipp, Zap's white quarter warhorse",
+      "stone obelisk with an inscription",
+      "sun dial",
+      "statue of Isaac Asimov",
+      "Wowbagger the Infinitely Prolonged"
     ],
     "last_seen": {
-      "Marvin, the cheerful juggler": "2025-09-08T17:19:53.209132",
-      "Middler, the armourer": "2025-09-08T17:22:25.301766",
-      "armourers cart": "2025-09-08T17:22:25.301766",
-      "Marcel, the butcher": "2025-09-08T17:22:25.301766",
-      "butcher's cart": "2025-09-08T17:22:25.301766",
+      "Marvin, the cheerful juggler": "2025-09-08T19:56:29.859968",
+      "Middler, the armourer": "2025-09-08T19:56:29.859968",
+      "armourers cart": "2025-09-08T19:56:29.859968",
+      "Marcel, the butcher": "2025-09-08T19:56:29.859968",
+      "butcher's cart": "2025-09-08T19:56:29.859968",
       "Corpse of Marvin": "2025-09-08T17:22:25.301766",
-      "Zipp, Zap's white quarter warhorse": "2025-09-08T17:22:25.301766"
+      "Zipp, Zap's white quarter warhorse": "2025-09-08T20:55:08.862046",
+      "stone obelisk with an inscription": "2025-09-08T21:00:15.165294",
+      "sun dial": "2025-09-08T21:00:15.165294",
+      "statue of Isaac Asimov": "2025-09-08T21:00:15.165294",
+      "Wowbagger the Infinitely Prolonged": "2025-09-08T20:55:08.862046"
     }
   },
   "585": {
@@ -43,8 +51,8 @@
       "baker's cart"
     ],
     "last_seen": {
-      "very expensive tailor": "2025-09-08T17:22:23.605119",
-      "There are five exits: north, east, southeast, south and west": "2025-09-08T17:22:23.605119",
+      "very expensive tailor": "2025-09-08T20:08:09.615829",
+      "There are five exits: north, east, southeast, south and west": "2025-09-08T20:08:09.615829",
       "Mothrus, the happy baker": "2025-09-08T17:22:23.605119",
       "baker's cart": "2025-09-08T17:22:23.605119"
     }
@@ -57,22 +65,32 @@
       "strange smiling Lady"
     ],
     "last_seen": {
-      "list of archwizards": "2025-09-08T17:21:39.372152",
-      "Harry the affectionate": "2025-09-08T17:21:39.372152",
-      "slime": "2025-09-08T17:21:39.372152",
-      "strange smiling Lady": "2025-09-08T17:21:39.372152"
+      "list of archwizards": "2025-09-08T21:00:25.434489",
+      "Harry the affectionate": "2025-09-08T20:41:53.969833",
+      "slime": "2025-09-08T20:55:06.357874",
+      "strange smiling Lady": "2025-09-08T20:55:06.357874"
     }
   },
   "588": {
     "items": [
       "map of Nightfall City",
       "Hartward, the shopkeeper",
-      "awful looking dustbin"
+      "awful looking dustbin",
+      "Harry the affectionate",
+      "scroll (mass panic)",
+      "2 copper coins",
+      "map o",
+      "An"
     ],
     "last_seen": {
-      "map of Nightfall City": "2025-09-08T17:21:07.968651",
-      "Hartward, the shopkeeper": "2025-09-08T17:21:07.968651",
-      "awful looking dustbin": "2025-09-08T17:21:07.968651"
+      "map of Nightfall City": "2025-09-09T09:51:05.474139",
+      "Hartward, the shopkeeper": "2025-09-08T20:50:45.282743",
+      "awful looking dustbin": "2025-09-09T09:51:05.474139",
+      "Harry the affectionate": "2025-09-08T20:50:45.282743",
+      "scroll (mass panic)": "2025-09-08T21:30:47.744380",
+      "2 copper coins": "2025-09-09T09:51:05.474139",
+      "map o": "2025-09-08T21:17:14.950460",
+      "An": "2025-09-09T08:55:02.111607"
     }
   },
   "1397": {
@@ -167,6 +185,14 @@
     "last_seen": {
       "busy streets of Nightfall. To the west lies the Central Airport of Nightfall": "2025-09-08T17:22:15.375918",
       "There are four exits: north, east, south and west": "2025-09-08T17:22:15.375918"
+    }
+  },
+  "7745": {
+    "items": [
+      "Central Player Board"
+    ],
+    "last_seen": {
+      "Central Player Board": "2025-09-08T20:41:52.506633"
     }
   }
 }

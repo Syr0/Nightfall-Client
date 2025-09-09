@@ -26,6 +26,7 @@ class MapViewer:
         self.theme_manager = theme_manager
         self.current_room_id = None
         self.displayed_zone_id = None
+        self.current_player_zone_id = None  # Track where player is standing
         self.current_level = 0
         self.levels_dict = {}
         self.has_found_position = False
@@ -101,8 +102,10 @@ class MapViewer:
         self.zone_listbox.config(yscrollcommand=scrollbar.set)
         scrollbar.config(command=self.zone_listbox.yview)
         
+        self.zone_names_to_ids = {}  # Map zone names to IDs for marking
         for zone_name in sorted(self.zone_dict.keys()):
             self.zone_listbox.insert(tk.END, zone_name)
+            self.zone_names_to_ids[zone_name] = self.zone_dict[zone_name]
         
         self.zone_listbox.pack(side=tk.LEFT, fill=tk.BOTH, expand=True)
         self.zone_listbox.bind('<<ListboxSelect>>', self.on_zone_select)
@@ -310,23 +313,54 @@ class MapViewer:
         widget.bind("<Leave>", on_leave, add='+')
 
     def display_zone(self, zone_id, auto_fit=True):
+        # Save camera state for previous zone before switching
+        if self.displayed_zone_id and self.displayed_zone_id != zone_id:
+            print(f"[MAP] Saving camera state for zone {self.displayed_zone_id} (level {self.current_level})")
+            # Include level in the zone key for multi-level zones
+            zone_key = f"{self.displayed_zone_id}_{self.current_level}"
+            self.camera.save_zone_state(zone_key)
+        
         self.displayed_zone_id = zone_id
+        
+        # Update camera's current zone for auto-save on zoom/pan
+        zone_key = f"{zone_id}_{self.current_level}"
+        self.camera.current_zone_id = zone_key
+        
+        # Try to restore camera state BEFORE drawing
+        print(f"[MAP] Trying to restore camera state for zone {zone_id} (level {self.current_level})")
+        has_saved_state = self.camera.restore_zone_state(zone_key)
+        
+        # Now draw the map
         self.this.delete("all")
         rooms = fetch_rooms(zone_id, z=self.current_level)
         exits_info = self.exits_with_zone_info([room[0] for room in rooms])
-
         self.draw_map(rooms, exits_info)
-        # Fit all rooms in view after drawing (unless disabled)
-        if auto_fit:
+        
+        # Apply pending view transformations after drawing
+        if has_saved_state:
+            self.camera.apply_pending_view()
+        elif auto_fit:
+            # No saved state - fit to content for first time viewing
+            print(f"[MAP] No saved state for zone {zone_id}, fitting to content")
             self.this.after(100, self.camera.fit_to_content)
 
 
     def change_level(self, delta):
+        # Save camera state for current level before changing
+        if self.displayed_zone_id:
+            zone_key = f"{self.displayed_zone_id}_{self.current_level}"
+            self.camera.save_zone_state(zone_key)
+            
         new_level = self.current_level + delta
         self.current_level = new_level
         self.level_var.set(f"Level: {self.current_level}")
-        # Display zone with auto-fit to show all rooms at new level
-        self.display_zone(self.displayed_zone_id)  # Will auto-fit by default
+        
+        # Update camera's current zone for auto-save on zoom/pan
+        zone_key = f"{self.displayed_zone_id}_{self.current_level}"
+        self.camera.current_zone_id = zone_key
+        
+        # Display zone - camera state will be restored or auto-fit
+        self.display_zone(self.displayed_zone_id)
     
     def manual_find_position(self):
         """Manually trigger position finding by sending 'l' command"""
@@ -487,11 +521,54 @@ class MapViewer:
         if selection:
             index = selection[0]
             zone_name = event.widget.get(index)
+            # Remove marker if present
+            if zone_name.startswith("● "):
+                zone_name = zone_name[2:]
             zone_id = self.zone_dict[zone_name]
             self.current_level = 0
             self.level_var.set(f"Level: {self.current_level}")
             self.display_zone(zone_id)  # Will auto-fit by default
             # No need for extra fit_map_to_view since display_zone handles it
+    
+    def mark_player_zone_in_list(self, zone_id):
+        """Mark the zone where the player is standing with a bullet point"""
+        if not hasattr(self, 'zone_listbox'):
+            return
+            
+        self.current_player_zone_id = zone_id
+        
+        # Find the zone name for this ID
+        player_zone_name = None
+        for zone_name, z_id in self.zone_dict.items():
+            if z_id == zone_id:
+                player_zone_name = zone_name
+                break
+        
+        if not player_zone_name:
+            return
+            
+        # Get theme colors for list
+        listbox_fg = "#FFFFFF" if self.background_color[1] < '5' else "#000000"
+        
+        # Update all items in the listbox
+        for i in range(self.zone_listbox.size()):
+            item_text = self.zone_listbox.get(i)
+            # Remove existing marker if any
+            if item_text.startswith("● "):
+                item_text = item_text[2:]
+            
+            # Add marker to player's zone
+            if item_text == player_zone_name:
+                self.zone_listbox.delete(i)
+                self.zone_listbox.insert(i, f"● {item_text}")
+                # Highlight player's zone with theme color
+                self.zone_listbox.itemconfig(i, fg=self.player_marker_color)
+            else:
+                # Reset other items
+                self.zone_listbox.delete(i)
+                self.zone_listbox.insert(i, item_text)
+                # Use theme color
+                self.zone_listbox.itemconfig(i, fg=listbox_fg)
     
     def on_zone_list_keypress(self, event):
         """Handle keyboard navigation in zone list"""
@@ -500,7 +577,11 @@ class MapViewer:
         
         # Find first zone starting with typed letter
         target_char = event.char.upper()
-        for i, zone_name in enumerate(self.sorted_zone_names):
+        for i in range(self.zone_listbox.size()):
+            zone_name = self.zone_listbox.get(i)
+            # Remove marker if present
+            if zone_name.startswith("● "):
+                zone_name = zone_name[2:]
             if zone_name.upper().startswith(target_char):
                 # Select and show the zone
                 self.zone_listbox.selection_clear(0, tk.END)
@@ -926,6 +1007,12 @@ class MapViewer:
             # Mark that we've found a position
             self.has_found_position = True
             self.last_zone_id = self.displayed_zone_id
+            
+            # Update player's zone marker in list
+            from core.database import fetch_room_zone_id
+            player_zone = fetch_room_zone_id(room_id)
+            if player_zone:
+                self.mark_player_zone_in_list(player_zone)
     
     def apply_theme(self, map_theme):
         """Apply a theme to the map"""
@@ -985,6 +1072,10 @@ class MapViewer:
             # Update parent frame
             if self.zone_listbox.master:
                 self.zone_listbox.master.config(bg=self.background_color)
+            
+            # Re-apply player zone marker with new theme colors
+            if self.current_player_zone_id:
+                self.mark_player_zone_in_list(self.current_player_zone_id)
     
     def on_double_click(self, event):
         # Convert event coordinates to canvas coordinates

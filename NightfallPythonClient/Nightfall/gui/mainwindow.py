@@ -17,16 +17,14 @@ class MainWindow:
         self.command_history_index = -1
         self.saved_input = ""
         self.awaiting_response_for_command = False
-        self.ansi_colors = {}
         self.login_mode = None  # 'username' or 'password'
         self.entered_username = None
         self.input_start = None  # Track where input starts in terminal
 
         self.config = load_config()
         self.theme_manager = ThemeManager()
-        self.load_ansi_colors()
-
-        self.command_color = self.theme_manager.get_theme()['ansi_colors'].get('command', '#FFA500')
+        
+        self.command_color = '#FFA500'  # Orange for user commands
 
         self.initialize_window()
         self.load_trigger_commands()
@@ -114,35 +112,43 @@ class MainWindow:
     def on_login_prompt(self, prompt_type):
         """Handle login prompts from the connection"""
         self.login_mode = prompt_type
-        if prompt_type == 'username':
-            self.text_area.insert(tk.END, "\n[Enter username]\n", 'command')
-        elif prompt_type == 'password':
-            self.text_area.insert(tk.END, "\n[Enter password]\n", 'command')
+        # Don't add any client messages - let the server handle all prompts
         self.text_area.see(tk.END)
         self.show_prompt()
+    
+    def get_ansi_color(self, code):
+        """Get standard ANSI color for a code - optimized for visibility"""
+        standard_colors = {
+            "30": "#000000",  # Black
+            "31": "#CC0000",  # Red
+            "32": "#00CC00",  # Green
+            "33": "#CCCC00",  # Yellow
+            "34": "#0000CC",  # Blue
+            "35": "#CC00CC",  # Magenta (items - darker purple)
+            "36": "#00CCCC",  # Cyan
+            "37": "#CCCCCC",  # White/Gray
+            "90": "#666666",  # Bright Black
+            "91": "#FF6666",  # Bright Red
+            "92": "#66FF66",  # Bright Green
+            "93": "#FFFF66",  # Bright Yellow
+            "94": "#6666FF",  # Bright Blue
+            "95": "#FF66FF",  # Bright Magenta (NPCs - bright purple)
+            "96": "#66FFFF",  # Bright Cyan
+            "97": "#FFFFFF",  # Bright White
+        }
+        return standard_colors.get(code)
 
-    def load_ansi_colors(self):
-        # Get ANSI colors from theme
-        theme = self.theme_manager.get_theme()
-        self.ansi_colors = theme['ansi_colors'].copy()
-        
-        # Remove non-ANSI entries
-        if 'command' in self.ansi_colors:
-            del self.ansi_colors['command']
 
-    def create_color_tags(self):
-        for code, color in self.ansi_colors.items():
-            self.text_area.tag_configure(code, foreground=color)
-        self.text_area.tag_configure('command', foreground=self.command_color)
-        # Create default highlight tag
-        self.text_area.tag_configure('highlight_default', foreground='#AAAAAA')
 
     def show_prompt(self):
         """Add command prompt to terminal"""
+        # Create command tag if it doesn't exist
+        self.text_area.tag_configure('command', foreground=self.command_color)
         self.text_area.insert(tk.END, "> ", 'command')
         self.input_start = self.text_area.index("end-1c")
         self.text_area.mark_set("input_start", self.input_start)
         self.text_area.see(tk.END)
+    
 
     def handle_return(self, event):
         """Handle Enter key in terminal"""
@@ -230,6 +236,7 @@ class MainWindow:
         buffer = ""
         i = 0
         char_position = 0  # Track position without ANSI codes
+        is_bold = False  # Track bold state ACROSS escape sequences
         
         while i < len(message):
             if i < len(message) - 1 and message[i] == '\x1b' and message[i + 1] == '[':
@@ -238,18 +245,37 @@ class MainWindow:
                 if end_idx != -1:
                     # Parse color codes (can be multiple separated by semicolons)
                     codes = message[i + 2:end_idx].split(';')
+                    new_color = None
+                    
                     for code in codes:
                         if code == '0' or code == '':
-                            # Reset
+                            # Reset - clear everything including bold
                             if buffer:
                                 self.append_to_buffer_with_highlight(buffer, current_color, char_position - len(buffer), char_position)
                                 buffer = ""
                             current_color = None
-                        elif code in self.ansi_colors:
-                            if buffer:
-                                self.append_to_buffer_with_highlight(buffer, current_color, char_position - len(buffer), char_position)
-                                buffer = ""
-                            current_color = code
+                            is_bold = False  # Reset clears bold
+                        elif code == '1':
+                            # Bold - important for NPCs! Keep this state
+                            is_bold = True
+                        elif code in ['30', '31', '32', '33', '34', '35', '36', '37']:
+                            # Standard color
+                            if is_bold:
+                                # Bold + standard color = bright color (NPCs use this!)
+                                new_color = str(int(code) + 60)  # Convert to bright (90-97)
+                                print(f"[ANSI] Converting bold+{code} to bright {new_color}")
+                            else:
+                                new_color = code
+                        elif code in ['90', '91', '92', '93', '94', '95', '96', '97']:
+                            # Already bright color
+                            new_color = code
+                    
+                    # Apply the color if we got one
+                    if new_color:
+                        if buffer:
+                            self.append_to_buffer_with_highlight(buffer, current_color, char_position - len(buffer), char_position)
+                            buffer = ""
+                        current_color = new_color
                     i = end_idx + 1
                 else:
                     buffer += message[i]
@@ -292,10 +318,16 @@ class MainWindow:
             # Delete from start of prompt to end
             self.text_area.delete(f"{self.input_start}-2c", "end")
             
-            # Insert buffered text
-            for text, color_tag in self.update_buffer:
-                if color_tag and color_tag in self.ansi_colors:
-                    self.text_area.insert("end", text, color_tag)
+            # Insert buffered text with dynamic color handling
+            for text, color_code in self.update_buffer:
+                if color_code:
+                    # Create tag dynamically for ANSI color
+                    color = self.get_ansi_color(color_code)
+                    if color:
+                        self.text_area.tag_configure(color_code, foreground=color)
+                        self.text_area.insert("end", text, color_code)
+                    else:
+                        self.text_area.insert("end", text)
                 else:
                     self.text_area.insert("end", text)
             
@@ -303,10 +335,16 @@ class MainWindow:
             self.show_prompt()
             self.text_area.insert("end", current_input)
         else:
-            # No prompt, just append
-            for text, color_tag in self.update_buffer:
-                if color_tag and color_tag in self.ansi_colors:
-                    self.text_area.insert("end", text, color_tag)
+            # No prompt, just append with dynamic color handling
+            for text, color_code in self.update_buffer:
+                if color_code:
+                    # Create tag dynamically for ANSI color
+                    color = self.get_ansi_color(color_code)
+                    if color:
+                        self.text_area.tag_configure(color_code, foreground=color)
+                        self.text_area.insert("end", text, color_code)
+                    else:
+                        self.text_area.insert("end", text)
                 else:
                     self.text_area.insert("end", text)
         
@@ -351,11 +389,23 @@ class MainWindow:
         console_frame.configure(bg=theme['console']['bg'])
         
         # Create text area - NOT DISABLED! We type directly in it
-        self.text_area = tk.Text(console_frame, wrap=tk.WORD, insertwidth=2)
-        self.theme_manager.apply_theme_to_widget(self.text_area, 'console')
-        self.text_area.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
+        theme = self.theme_manager.get_theme()
+        console_bg = theme.get('console', {}).get('bg', '#FFFFFF')
         
-        self.create_color_tags()
+        # Determine default foreground based on background
+        if console_bg in ['#272822', '#1E1E1E', '#0A0E27', '#0D0221']:  # Dark themes
+            default_fg = '#CCCCCC'  # Light gray default
+        else:  # Light themes
+            default_fg = '#333333'  # Dark gray default
+            
+        self.text_area = tk.Text(console_frame, wrap=tk.WORD, insertwidth=2, 
+                                bg=console_bg, fg=default_fg)
+        
+        # Apply theme for font only (bg already set)
+        if 'console' in theme and 'font' in theme['console']:
+            self.text_area.config(font=theme['console']['font'])
+            
+        self.text_area.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         
         # Bind terminal input keys
         self.text_area.bind("<Return>", self.handle_return)
@@ -432,26 +482,31 @@ class MainWindow:
         """Apply current theme to all UI elements"""
         theme = self.theme_manager.get_theme()
         
-        # Update console
-        self.theme_manager.apply_theme_to_widget(self.text_area, 'console')
+        # Get console theme settings
+        console_bg = theme.get('console', {}).get('bg', '#FFFFFF')
+        
+        # Determine default foreground based on background
+        if console_bg in ['#272822', '#1E1E1E', '#0A0E27', '#0D0221']:  # Dark themes
+            default_fg = '#CCCCCC'  # Light gray default
+        else:  # Light themes
+            default_fg = '#333333'  # Dark gray default
+        
+        # Apply background, foreground and font together
+        self.text_area.config(bg=console_bg, fg=default_fg)
+        if 'console' in theme and 'font' in theme['console']:
+            self.text_area.config(font=theme['console']['font'])
         
         # Update toolbar
         toolbar_theme = theme['toolbar']
         self.toolbar.config(bg=toolbar_theme['bg'])
         
+        # Button style for toolbar buttons (if they exist)
         button_style = {
             'bg': toolbar_theme['button_bg'],
             'fg': toolbar_theme['button_fg'],
             'activebackground': toolbar_theme['button_active'],
             'activeforeground': toolbar_theme['fg'],
         }
-        
-        self.level_up_btn.config(**button_style)
-        self.level_down_btn.config(**button_style)
-        
-        # Update ANSI colors
-        self.load_ansi_colors()
-        self.create_color_tags()
         
         # Update map if exists
         if hasattr(self, 'map_viewer'):

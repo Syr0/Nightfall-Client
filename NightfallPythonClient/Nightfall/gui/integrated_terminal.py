@@ -10,10 +10,10 @@ class IntegratedTerminal:
         self.connection = connection
         self.trigger_commands = trigger_commands
         
-        # Create text widget
-        theme = self.theme_manager.get_theme()
+        # Create text widget with theme background and font
         self.text = tk.Text(parent, wrap=tk.WORD)
-        self.apply_theme()
+        # Apply theme for background and font only
+        self.theme_manager.apply_theme_to_widget(self.text, 'console')
         self.text.pack(fill=tk.BOTH, expand=True, padx=2, pady=2)
         
         # Input handling
@@ -29,10 +29,7 @@ class IntegratedTerminal:
         # Setup bindings
         self.setup_bindings()
         
-        # Create color tags
-        self.create_color_tags()
-        
-        # Start with prompt
+        # Start with prompt (no color tags needed - handle dynamically)
         self.add_prompt()
         
     def setup_bindings(self):
@@ -53,31 +50,11 @@ class IntegratedTerminal:
         self.text.bind("<Control-Left>", self.word_left)
         self.text.bind("<Control-Right>", self.word_right)
         
-    def apply_theme(self):
-        """Apply current theme to terminal"""
-        theme = self.theme_manager.get_theme()['console']
-        config = theme.copy()
-        if 'font' in config:
-            self.text.config(font=config.pop('font'))
-        self.text.config(**config)
         
-    def create_color_tags(self):
-        """Create ANSI color tags"""
-        theme = self.theme_manager.get_theme()
-        ansi_colors = theme['ansi_colors']
-        
-        for code, color in ansi_colors.items():
-            if code != 'command':
-                self.text.tag_configure(code, foreground=color)
-        
-        # Command color
-        command_color = ansi_colors.get('command', '#FFA500')
-        self.text.tag_configure('command', foreground=command_color)
-        self.text.tag_configure('prompt', foreground=command_color, font=('Consolas', 10, 'bold'))
         
     def add_prompt(self):
         """Add a new prompt"""
-        self.text.insert("end", "> ", 'prompt')
+        self.text.insert("end", "> ")
         self.input_start = self.text.index("end-1c")
         self.text.mark_set("input_start", self.input_start)
         self.text.mark_set("insert", "end")
@@ -188,13 +165,28 @@ class IntegratedTerminal:
         return "break"
         
     def handle_copy(self, event):
-        """Copy selected text"""
+        """Copy selected text or send interrupt if no selection"""
         try:
+            # Try to get selected text
             selected = self.text.get("sel.first", "sel.last")
-            self.text.clipboard_clear()
-            self.text.clipboard_append(selected)
+            if selected:
+                # Copy selected text to clipboard
+                self.text.clipboard_clear()
+                self.text.clipboard_append(selected)
+                # Force clipboard update for Windows
+                self.text.update()
+                return "break"
         except tk.TclError:
-            pass
+            # No selection - send Ctrl+C to server as interrupt
+            if self.connection and self.connection.connected:
+                # Send Ctrl+C character (ASCII 3 - ETX)
+                self.connection.send_raw(b'\x03')
+                # Clear current input line
+                if self.input_start:
+                    self.text.delete(self.input_start, "end-1c")
+                    self.text.insert("end", "^C\n")
+                    self.input_start = None
+                    self.add_prompt()
         return "break"
         
     def handle_paste(self, event):
@@ -263,39 +255,31 @@ class IntegratedTerminal:
         self.text.mark_set("insert", "end-1c")
         return "break"
         
-    def append_output(self, text, color_tag=None):
+    def append_output(self, text):
         """Append output to terminal (before prompt)"""
+        # Text already contains ANSI codes from server
         if self.input_start:
             # Insert before prompt
             insert_pos = self.text.index(f"{self.input_start} -2c")
-            if color_tag:
-                self.text.insert(insert_pos, text, color_tag)
-            else:
-                self.text.insert(insert_pos, text)
+            self.text.insert(insert_pos, text)
             # Update input start position
             self.input_start = self.text.index("input_start")
         else:
             # No prompt, insert at end
-            if color_tag:
-                self.text.insert("end", text, color_tag)
-            else:
-                self.text.insert("end", text)
+            self.text.insert("end", text)
                 
         self.text.see("end")
         
     def set_login_mode(self, mode):
         """Set login mode"""
         self.login_mode = mode
-        if mode == 'username':
-            self.append_output("\n[Enter username]\n", 'command')
-        elif mode == 'password':
-            self.append_output("\n[Enter password]\n", 'command')
+        # Don't add any client-side messages, let server handle all prompts
         self.add_prompt()
         
     def on_login_success(self):
         """Handle successful login"""
         self.login_mode = None
-        self.append_output("\n[Login successful]\n", 'command')
+        # Don't add any client-side messages, server will send appropriate response
         
     def focus(self):
         """Focus the terminal"""

@@ -41,22 +41,6 @@ class ThemeManager:
                     "relief": "flat",
                 },
                 "ansi_colors": {
-                    "30": "#272822",  # Black
-                    "31": "#F92672",  # Red  
-                    "32": "#A6E22E",  # Green
-                    "33": "#F4BF75",  # Yellow
-                    "34": "#66D9EF",  # Blue
-                    "35": "#AE81FF",  # Magenta
-                    "36": "#A1EFE4",  # Cyan
-                    "37": "#F8F8F2",  # White
-                    "90": "#75715E",  # Bright Black
-                    "91": "#F92672",  # Bright Red
-                    "92": "#A6E22E",  # Bright Green
-                    "93": "#E6DB74",  # Bright Yellow
-                    "94": "#66D9EF",  # Bright Blue
-                    "95": "#AE81FF",  # Bright Magenta
-                    "96": "#A1EFE4",  # Bright Cyan
-                    "97": "#F9F8F5",  # Bright White
                     "command": "#FD971F",  # Orange for commands
                 }
             },
@@ -95,22 +79,6 @@ class ThemeManager:
                     "relief": "flat",
                 },
                 "ansi_colors": {
-                    "30": "#1E1E1E",  # Black
-                    "31": "#F14C4C",  # Red
-                    "32": "#89D185",  # Green  
-                    "33": "#CCA700",  # Yellow
-                    "34": "#3794FF",  # Blue
-                    "35": "#B267E6",  # Magenta
-                    "36": "#43C3D6",  # Cyan
-                    "37": "#CCCCCC",  # White
-                    "90": "#666666",  # Bright Black
-                    "91": "#F14C4C",  # Bright Red
-                    "92": "#89D185",  # Bright Green
-                    "93": "#F5F543",  # Bright Yellow
-                    "94": "#3794FF",  # Bright Blue
-                    "95": "#B267E6",  # Bright Magenta
-                    "96": "#43C3D6",  # Bright Cyan
-                    "97": "#FFFFFF",  # Bright White
                     "command": "#CE9178",  # Orange for commands
                 }
             },
@@ -149,22 +117,6 @@ class ThemeManager:
                     "relief": "raised",
                 },
                 "ansi_colors": {
-                    "30": "#2C2C2C",  # Black
-                    "31": "#C0392B",  # Red
-                    "32": "#27AE60",  # Green
-                    "33": "#F39C12",  # Yellow
-                    "34": "#2980B9",  # Blue
-                    "35": "#8E44AD",  # Magenta
-                    "36": "#16A085",  # Cyan
-                    "37": "#7F8C8D",  # White
-                    "90": "#555555",  # Bright Black
-                    "91": "#E74C3C",  # Bright Red
-                    "92": "#2ECC71",  # Bright Green
-                    "93": "#F1C40F",  # Bright Yellow
-                    "94": "#3498DB",  # Bright Blue
-                    "95": "#9B59B6",  # Bright Magenta
-                    "96": "#1ABC9C",  # Bright Cyan
-                    "97": "#ECF0F1",  # Bright White
                     "command": "#E67E22",  # Orange for commands
                 }
             },
@@ -203,22 +155,6 @@ class ThemeManager:
                     "relief": "flat",
                 },
                 "ansi_colors": {
-                    "30": "#0A0E27",  # Black
-                    "31": "#FF0066",  # Red
-                    "32": "#00FF88",  # Green
-                    "33": "#FFFF00",  # Yellow
-                    "34": "#00BBFF",  # Blue
-                    "35": "#FF00FF",  # Magenta
-                    "36": "#00FFFF",  # Cyan
-                    "37": "#00FFF0",  # White
-                    "90": "#5555AA",  # Bright Black
-                    "91": "#FF3388",  # Bright Red
-                    "92": "#88FFAA",  # Bright Green
-                    "93": "#FFFFAA",  # Bright Yellow
-                    "94": "#88DDFF",  # Bright Blue
-                    "95": "#FF88FF",  # Bright Magenta
-                    "96": "#88FFFF",  # Bright Cyan
-                    "97": "#FFFFFF",  # Bright White
                     "command": "#FF8800",  # Orange for commands
                 }
             }
@@ -263,6 +199,19 @@ class ThemeManager:
     
     def apply_theme_to_widget(self, widget, widget_type):
         """Apply theme to a specific widget"""
+        # For console, only apply background and font - NEVER touch text colors
+        if widget_type == 'console':
+            theme = self.get_theme()
+            if 'console' in theme:
+                console_theme = theme['console']
+                # Only apply background and font settings
+                if 'bg' in console_theme:
+                    widget.config(bg=console_theme['bg'])
+                if 'font' in console_theme:
+                    widget.config(font=console_theme['font'])
+                # DO NOT apply fg color - server controls all text colors
+            return
+            
         theme = self.get_theme()
         if widget_type in theme:
             config = theme[widget_type].copy()

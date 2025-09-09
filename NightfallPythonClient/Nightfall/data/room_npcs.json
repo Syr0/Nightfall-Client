@@ -1,0 +1,36 @@
+{
+  "10996": {
+    "npcs": [
+      "Wowbagger the Infinitely Prolonged",
+      "Zipp, Zap's white quarter warhorse"
+    ],
+    "last_seen": {
+      "Wowbagger the Infinitely Prolonged": "2025-09-08T20:57:55.751664",
+      "Zipp, Zap's white quarter warhorse": "2025-09-08T21:00:15.165294"
+    }
+  },
+  "587": {
+    "npcs": [
+      "Harry the affectionate",
+      "slime",
+      "strange smiling Lady"
+    ],
+    "last_seen": {
+      "Harry the affectionate": "2025-09-08T21:00:25.434489",
+      "slime": "2025-09-08T21:00:25.434489",
+      "strange smiling Lady": "2025-09-08T21:00:25.434489"
+    }
+  },
+  "588": {
+    "npcs": [
+      "Harry the affectionate",
+      "Hartwa",
+      "Hartward, the shopkeeper"
+    ],
+    "last_seen": {
+      "Harry the affectionate": "2025-09-08T21:17:14.950460",
+      "Hartwa": "2025-09-08T21:30:47.744380",
+      "Hartward, the shopkeeper": "2025-09-09T09:51:05.474139"
+    }
+  }
+}
