@@ -171,7 +171,7 @@ class ThemeManager:
                     saved_theme = data.get('theme', 'paper')
                     if saved_theme in self.themes:
                         self.current_theme = saved_theme
-            except:
+            except (FileNotFoundError, json.JSONDecodeError, KeyError):
                 pass
     
     def save_theme_preference(self):

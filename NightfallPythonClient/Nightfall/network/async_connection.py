@@ -5,41 +5,39 @@ from typing import Optional, Callable
 from config.settings import load_config, save_config
 
 
-class TelnetProtocol:
-    """Handles Telnet protocol negotiation"""
-    IAC = 255
-    WILL = 251
-    WONT = 252
-    DO = 253
-    DONT = 254
+# Telnet protocol constants
+IAC = 255
+WILL = 251
+WONT = 252
+DO = 253
+DONT = 254
+
+def process_telnet(data: bytes, writer: Optional[StreamWriter] = None) -> bytes:
+    """Remove telnet commands and respond to negotiations"""
+    cleaned = bytearray()
+    i = 0
     
-    @staticmethod
-    def process_telnet(data: bytes, writer: Optional[StreamWriter] = None) -> bytes:
-        """Remove telnet commands and respond to negotiations"""
-        cleaned = bytearray()
-        i = 0
-        
-        while i < len(data):
-            if data[i] == TelnetProtocol.IAC:
-                if i + 2 < len(data):
-                    command = data[i + 1]
-                    option = data[i + 2]
-                    
-                    # Respond to telnet negotiations if writer provided
-                    if writer:
-                        if command == TelnetProtocol.WILL:
-                            writer.write(bytes([TelnetProtocol.IAC, TelnetProtocol.DONT, option]))
-                        elif command == TelnetProtocol.DO:
-                            writer.write(bytes([TelnetProtocol.IAC, TelnetProtocol.WONT, option]))
-                    
-                    i += 3
-                else:
-                    break
+    while i < len(data):
+        if data[i] == IAC:
+            if i + 2 < len(data):
+                command = data[i + 1]
+                option = data[i + 2]
+                
+                # Respond to telnet negotiations if writer provided
+                if writer:
+                    if command == WILL:
+                        writer.write(bytes([IAC, DONT, option]))
+                    elif command == DO:
+                        writer.write(bytes([IAC, WONT, option]))
+                
+                i += 3
             else:
-                cleaned.append(data[i])
-                i += 1
-        
-        return bytes(cleaned)
+                break
+        else:
+            cleaned.append(data[i])
+            i += 1
+    
+    return bytes(cleaned)
 
 
 class MUDStreamProtocol:
@@ -54,11 +52,12 @@ class MUDStreamProtocol:
         self.login_state = 'waiting'
         self.last_data_time = None
         self.incomplete_ansi = ""
+        self.MAX_BUFFER_SIZE = 100000  # 100KB max buffer size
         
-    def process_data(self, data: bytes, writer: StreamWriter) -> None:
+    def process_data(self, data: bytes, writer: StreamWriter, user: str, password: str) -> None:
         """Process incoming data chunk"""
         # Handle telnet negotiation
-        data = TelnetProtocol.process_telnet(data, writer)
+        data = process_telnet(data, writer)
         
         if not data:
             return
@@ -81,23 +80,40 @@ class MUDStreamProtocol:
             self.incomplete_ansi = incomplete_match.group()
             text = text[:incomplete_match.start()]
         
-        # Add to buffer
+        # Add to buffer with size limit
         self.buffer += text
         self.last_data_time = time.time()
+        
+        # Force flush if buffer is getting too large to prevent memory issues
+        if len(self.buffer) > self.MAX_BUFFER_SIZE:
+            print(f"[WARNING] Buffer exceeded {self.MAX_BUFFER_SIZE} bytes, force flushing")
+            self._flush_buffer()
+        
+        # Handle login BEFORE flushing buffer
+        self.handle_login(writer, user, password)
         
         # Check for complete messages based on state
         self._check_for_complete_messages()
     
     def _check_for_complete_messages(self):
         """Check if we have complete messages to send"""
+        # Only check the last few characters to avoid scanning entire buffer
+        buffer_len = len(self.buffer)
+        if buffer_len < 2:
+            return
+            
         if self.login_state == 'logged_in':
             # Wait for prompt to ensure complete data
-            if self.buffer.endswith('> '):
+            # Only check last 2 characters for efficiency
+            if buffer_len >= 2 and self.buffer[-2:] == '> ':
                 self._flush_buffer()
         else:
             # During login, flush on prompts
-            if self.buffer.endswith(': ') or self.buffer.endswith(':\n'):
-                self._flush_buffer()
+            # Check last 2-3 characters only
+            if buffer_len >= 2:
+                last_chars = self.buffer[-3:] if buffer_len >= 3 else self.buffer
+                if last_chars.endswith(': ') or last_chars.endswith(':\n'):
+                    self._flush_buffer()
     
     def check_timeout(self):
         """Check if we should flush due to timeout"""
@@ -118,8 +134,10 @@ class MUDStreamProtocol:
         buffer_lower = self.buffer.lower()
         
         if self.login_state == 'waiting':
-            if any(x in self.buffer for x in ["Gamedriver", "LPmud", "Enter your name", "login:", "name:"]):
+            # Check for various login prompts
+            if any(x.lower() in buffer_lower for x in ["gamedriver", "lpmud", "enter your name", "login:", "name:", "username:"]):
                 if user:
+                    print(f"[AUTO-LOGIN] Detected login prompt, sending username")
                     writer.write(f"{user}\r\n".encode())
                     self.login_state = 'password_next'
                 else:
@@ -127,17 +145,22 @@ class MUDStreamProtocol:
                     if self.on_login_prompt:
                         self.on_login_prompt('username')
                         
-        elif self.login_state == 'password_next' and "password:" in buffer_lower:
-            if password:
-                writer.write(f"{password}\r\n".encode())
-                self.login_state = 'checking'
-            else:
-                self.login_state = 'password'
-                if self.on_login_prompt:
-                    self.on_login_prompt('password')
+        elif self.login_state == 'password_next':
+            # Look for password prompt
+            if "password:" in buffer_lower:
+                if password:
+                    print(f"[AUTO-LOGIN] Detected password prompt, sending credentials")
+                    writer.write(f"{password}\r\n".encode())
+                    self.login_state = 'checking'
+                else:
+                    self.login_state = 'password'
+                    if self.on_login_prompt:
+                        self.on_login_prompt('password')
                     
         elif self.login_state in ['checking', 'password']:
-            if any(x in self.buffer for x in ["Reincarnating old body", "HP:", "Mana:"]):
+            # Check for successful login indicators
+            if any(x.lower() in buffer_lower for x in ["reincarnating", "hp:", "mana:", "exits:", "obvious exits"]):
+                print(f"[AUTO-LOGIN] Login successful!")
                 self.login_state = 'logged_in'
                 if self.on_login_success:
                     self.on_login_success()
@@ -191,16 +214,13 @@ class AsyncMUDConnection:
                 if not data:
                     break
                 
-                # Process the data
-                self.protocol.process_data(data, self.writer)
-                
-                # Handle login if needed
-                self.protocol.handle_login(self.writer, self.user, self.password)
+                # Process the data (including login handling)
+                self.protocol.process_data(data, self.writer, self.user, self.password)
                 
         except asyncio.CancelledError:
             pass
-        except Exception as e:
-            print(f"[ASYNC] Receive error: {e}")
+        except Exception:
+            pass
         finally:
             self.connected = False
     

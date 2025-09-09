@@ -4,8 +4,21 @@ import tkinter as tk
 import configparser
 
 from tkinter import ttk
-from core.database import fetch_rooms, fetch_zones, fetch_exits_with_zone_info, fetch_room_name, fetch_room_position, \
-    fetch_zone_name
+from core.fast_database import get_database
+
+# Get database instance
+_db = get_database()
+
+# Import database functions with compatibility wrappers
+def fetch_rooms(zone_id, z=None):
+    """Compatibility wrapper for get_rooms_in_zone"""
+    return _db.get_rooms_in_zone(zone_id, z_level=z)
+
+fetch_zones = _db.get_all_zones
+fetch_exits_with_zone_info = _db.get_exits_with_zone_info
+fetch_room_name = _db.get_room_name
+fetch_room_position = _db.get_room_position
+fetch_zone_name = _db.get_zone_name
 import map.camera
 from gui.tooltip import ToolTip
 from map.room_customization import RoomCustomization, RoomCustomizationDialog
@@ -489,13 +502,16 @@ class MapViewer:
                               font=('Helvetica', '10', 'bold'), tags=tags)
 
 
-    def show_room_name(self, event, room_id, event_x, event_y):
+    def get_room_tooltip_text(self, room_id):
+        """Get tooltip text for a room, including custom note if exists"""
         room_name = fetch_room_name(room_id)
-        
-        # Add custom note to tooltip if exists
         custom = self.room_customization.get_room_customization(room_id)
         if custom.get('note'):
             room_name = f"{room_name}\n\nNote: {custom['note']}"
+        return room_name
+
+    def show_room_name(self, event, room_id, event_x, event_y):
+        room_name = self.get_room_tooltip_text(room_id)
         
         if room_id not in self.tooltips:
             self.tooltips[room_id] = ToolTip(self.this)
@@ -504,11 +520,7 @@ class MapViewer:
 
     def update_tooltip_position(self, event, room_id, event_x, event_y):
         if room_id in self.tooltips:
-            room_name = fetch_room_name(room_id)
-            # Add custom note to tooltip if exists
-            custom = self.room_customization.get_room_customization(room_id)
-            if custom.get('note'):
-                room_name = f"{room_name}\n\nNote: {custom['note']}"
+            room_name = self.get_room_tooltip_text(room_id)
             self.tooltips[room_id].show_tip(room_name, event_x, event_y)
 
     def hide_room_name(self, event):
@@ -829,7 +841,7 @@ class MapViewer:
                 from datetime import datetime
                 dt = datetime.fromisoformat(last_seen)
                 time_str = dt.strftime("%m/%d %H:%M")
-            except:
+            except (ValueError, TypeError, KeyError):
                 time_str = "Unknown"
             
             # Insert with item name first
@@ -990,7 +1002,7 @@ class MapViewer:
         # If no zone is displayed, we need to display it first
         if not self.displayed_zone_id:
             # Get the zone for this room and display it
-            from core.database import fetch_room_zone_id
+            fetch_room_zone_id = _db.get_room_zone
             zone_id = fetch_room_zone_id(room_id)
             if zone_id:
                 # Don't auto-fit when displaying zone from position tracking
@@ -1009,7 +1021,7 @@ class MapViewer:
             self.last_zone_id = self.displayed_zone_id
             
             # Update player's zone marker in list
-            from core.database import fetch_room_zone_id
+            fetch_room_zone_id = _db.get_room_zone
             player_zone = fetch_room_zone_id(room_id)
             if player_zone:
                 self.mark_player_zone_in_list(player_zone)

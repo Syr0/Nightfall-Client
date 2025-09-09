@@ -18,6 +18,7 @@ class MainWindow:
         self.saved_input = ""
         self.awaiting_response_for_command = False
         self.login_mode = None  # 'username' or 'password'
+        self.MAX_LINES = 5000  # Maximum lines to keep in text widget
         self.entered_username = None
         self.input_start = None  # Track where input starts in terminal
 
@@ -227,7 +228,7 @@ class MainWindow:
             text = self.root.clipboard_get()
             if self.input_start:
                 self.text_area.insert("insert", text)
-        except:
+        except (tk.TclError, AttributeError):
             pass
         return "break"
 
@@ -263,7 +264,6 @@ class MainWindow:
                             if is_bold:
                                 # Bold + standard color = bright color (NPCs use this!)
                                 new_color = str(int(code) + 60)  # Convert to bright (90-97)
-                                print(f"[ANSI] Converting bold+{code} to bright {new_color}")
                             else:
                                 new_color = code
                         elif code in ['90', '91', '92', '93', '94', '95', '96', '97']:
@@ -348,9 +348,27 @@ class MainWindow:
                 else:
                     self.text_area.insert("end", text)
         
+        # Trim old lines if we exceed the maximum
+        self._trim_old_lines()
+        
         self.text_area.see("end")
         self.update_buffer = []
         self.update_pending = False
+    
+    def _trim_old_lines(self):
+        """Remove old lines from text widget to prevent memory bloat"""
+        try:
+            # Get current line count
+            line_count = int(self.text_area.index('end-1c').split('.')[0])
+            
+            # If we have too many lines, remove the oldest ones
+            if line_count > self.MAX_LINES:
+                lines_to_remove = line_count - self.MAX_LINES + 500  # Remove extra 500 lines as buffer
+                self.text_area.delete('1.0', f'{lines_to_remove}.0')
+                print(f"[MEMORY] Trimmed {lines_to_remove} old lines from display (keeping last {self.MAX_LINES} lines)")
+        except Exception as e:
+            # Don't let trimming errors break the display
+            pass
 
     def handle_message(self, message):
         # Store raw message for highlighting
@@ -365,7 +383,6 @@ class MainWindow:
         # Analyze for position if tracking is active
         if self.awaiting_response_for_command:
             if not self.auto_walker.is_active():
-                print("[POSITION] AutoWalker is not active!")
                 self.auto_walker.toggle_active()  # Re-enable it
             if self.auto_walker.is_active():
                 # Clean message of prompts
@@ -376,11 +393,8 @@ class MainWindow:
                 
                 # Process if it looks like a room description
                 if len(clean_message) > 80:
-                    print(f"[POSITION] Analyzing response for command '{self.last_command}' (length: {len(clean_message)})")
                     self.root.after(100, lambda: self.auto_walker.analyze_response(clean_message, is_look))
                     self.awaiting_response_for_command = False
-                else:
-                    print(f"[POSITION] Response too short ({len(clean_message)} chars), waiting for more...")
 
     def setup_console_ui(self, console_frame):
         theme = self.theme_manager.get_theme()

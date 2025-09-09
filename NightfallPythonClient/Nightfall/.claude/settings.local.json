@@ -6,7 +6,9 @@
       "Read(//c/Nightfall_Mud-Map/**)",
       "Bash(timeout:*)",
       "Bash(ping:*)",
-      "Bash(find:*)"
+      "Bash(find:*)",
+      "Bash(cat:*)",
+      "Bash(start profiling_results/profile_20250909_141841.html)"
     ],
     "deny": [],
     "ask": []

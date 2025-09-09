@@ -15,7 +15,7 @@ def check_tkinter():
 def main():
     check_tkinter()
 
-    packages = ["python-Levenshtein", "pyodbc"]
+    packages = ["python-Levenshtein"]
     for package in packages:
         try:
             __import__(package)

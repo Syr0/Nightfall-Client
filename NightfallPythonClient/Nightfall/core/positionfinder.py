@@ -1,6 +1,21 @@
 import threading
-from core.database import fetch_room_descriptions, fetch_connected_rooms, fetch_room_zone_id, fetch_room_name, fetch_room_position
+import re
+from core.fast_database import get_database
+
+# Get database instance
+_db = get_database()
+
+# Import database functions
+fetch_room_descriptions = _db.get_all_room_descriptions
+fetch_connected_rooms = _db.get_connected_room_descriptions
+fetch_room_zone_id = _db.get_room_zone
+fetch_room_name = _db.get_room_name
+fetch_room_position = _db.get_room_position
 import Levenshtein
+
+# PERFORMANCE: Compile regex patterns ONCE at module level
+ANSI_ESCAPE_PATTERN = re.compile(r'\x1b\[[0-9;]*m')
+EXIT_LINE_PATTERN = re.compile(r'(?:There (?:is|are)|The path leads|Exits?:)', re.IGNORECASE)
 
 class AutoWalker:
     def __init__(self, map_viewer):
@@ -59,17 +74,16 @@ class AutoWalker:
 
     def _process_response(self, response, is_look_command=False):
         if not self.active or response is None:
-            print(f"[POSITION] Not processing: active={self.active}, response={response is not None}")
             return
         
-        print(f"[POSITION] Processing response (is_look={is_look_command}, length={len(response)})")
+        # Quick exit for short responses
+        if len(response) < 80:
+            return
         
+        # Skip login messages
         login_indicators = ["Welcome back", "Gamedriver", "LPmud", "Reincarnating", 
                           "posts waiting", "Mails waiting", "already existing"]
         if any(indicator in response for indicator in login_indicators):
-            return
-        
-        if len(response) < 80:
             return
         exit_info = self._extract_exit_info(response)
         description = " ".join(response.split())
@@ -83,14 +97,13 @@ class AutoWalker:
             room_descriptions[self.current_room_id] = current_room_description
         best_match = self._find_matching_room_with_exits(exit_info, words_in_response, room_descriptions)
         if best_match:
-            print(f"[POSITION] Found matching room: {best_match}")
             
-            # Extract items/NPCs from the response
-            entities = self._extract_items_and_npcs(response)
-            if entities['items'] or entities['npcs']:
-                self._save_room_entities(best_match, entities)
-            
+            # Only extract items/NPCs when it's a look command (full room description)
+            # This avoids processing every single MUD output
             if is_look_command:
+                entities = self._extract_items_and_npcs(response)
+                if entities and (entities.get('items') or entities.get('npcs')):
+                    self._save_room_entities(best_match, entities)
                 try:
                     self._calculate_highlighting(response, best_match, is_look_command)
                 except Exception as e:
@@ -142,7 +155,6 @@ class AutoWalker:
                                                            'n', 's', 'e', 'w', 'ne', 'nw', 'se', 'sw', 'u', 'd']]
                 
                 if exit_dirs:
-                    print(f"[POSITION] Found exits: {exit_dirs}")
                     return {'count': len(exit_dirs), 'directions': exit_dirs}
         
         return None
@@ -224,7 +236,6 @@ class AutoWalker:
         candidates.sort(key=lambda x: x['total_score'], reverse=True)
         
         if not candidates:
-            print("[POSITION] No matching rooms found")
             return None
         
         # Get the top score
@@ -234,7 +245,6 @@ class AutoWalker:
         threshold = top_score * 0.8
         top_candidates = [c for c in candidates if c['total_score'] >= threshold]
         
-        print(f"[POSITION] Found {len(top_candidates)} candidates with similar scores (top score: {top_score})")
         
         # Among top candidates, prefer the one with best exit match
         best_candidate = None
@@ -244,8 +254,6 @@ class AutoWalker:
             room_id = candidate['room_id']
             exit_ratio = candidate['exit_match_ratio']
             
-            print(f"[POSITION] Candidate room {room_id}: desc_score={candidate['description_score']}, "
-                  f"exit_score={candidate['exit_score']}, exit_match={exit_ratio:.2f}")
             
             # Prefer candidates with better exit matches
             if exit_ratio > best_exit_ratio:
@@ -257,16 +265,9 @@ class AutoWalker:
                     best_candidate = candidate
         
         if best_candidate:
-            if best_candidate['exit_match_ratio'] >= 0.8:
-                print(f"[POSITION] Selected room {best_candidate['room_id']} with excellent exit match ({best_candidate['exit_match_ratio']:.2f})")
-            elif best_candidate['exit_match_ratio'] >= 0.5:
-                print(f"[POSITION] Selected room {best_candidate['room_id']} with partial exit match ({best_candidate['exit_match_ratio']:.2f})")
-            else:
-                print(f"[POSITION] Selected room {best_candidate['room_id']} based on description (poor exit match: {best_candidate['exit_match_ratio']:.2f})")
             return best_candidate['room_id']
         
         # Fallback
-        print("[POSITION] Using fallback room selection")
         return candidates[0]['room_id'] if candidates else None
     
     def _find_matching_room(self, words_in_response, room_descriptions):
@@ -373,9 +374,8 @@ class AutoWalker:
             pass
     
     def _clean_text_for_matching(self, text):
-        import re
-        ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
-        text = ansi_escape.sub('', text)
+        # Use pre-compiled regex for performance
+        text = ANSI_ESCAPE_PATTERN.sub('', text)
         text = ' '.join(text.split())
         return text.lower()
     
@@ -414,18 +414,16 @@ class AutoWalker:
     
     def _extract_items_and_npcs(self, response):
         """Extract items and NPCs from room description, distinguishing by ANSI codes"""
-        import re
         
         # Keep original with ANSI codes to detect NPCs vs items
         lines_with_ansi = response.split('\n')
-        # Also get clean lines for text extraction
-        ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
-        lines = [ansi_escape.sub('', line) for line in lines_with_ansi]
+        # Also get clean lines for text extraction (use pre-compiled regex)
+        lines = [ANSI_ESCAPE_PATTERN.sub('', line) for line in lines_with_ansi]
         
         # Find where exits line is (items/NPCs come after)
         exit_line_idx = -1
         for i, line in enumerate(lines):
-            if re.search(r'(?:There (?:is|are)|The path leads|Exits?:)', line, re.IGNORECASE):
+            if EXIT_LINE_PATTERN.search(line):
                 exit_line_idx = i
                 break
         
@@ -461,7 +459,7 @@ class AutoWalker:
                     
                     # If next line starts with lowercase or is a continuation, combine them
                     if next_line and (next_line[0].islower() or next_line.startswith('rd,')):
-                        print(f"[DEBUG] Combining split lines: '{line}' + '{next_line}'")
+                        # print(f"[DEBUG] Combining split lines: '{line}' + '{next_line}'")
                         # Combine the lines
                         line = line + next_line
                         line_with_ansi = line_with_ansi + next_line_with_ansi
@@ -473,13 +471,12 @@ class AutoWalker:
             is_npc = False
             has_purple = False
             
-            # Debug: Show exact ANSI codes in the line
-            import re
-            ansi_codes = re.findall(r'\x1b\[[0-9;]*m', line_with_ansi)
-            if ansi_codes and ('35' in str(ansi_codes) or '95' in str(ansi_codes)):
-                print(f"[DEBUG] Full line: '{line}'")
-                print(f"[DEBUG] Line length: {len(line)}, ends with period: {line.endswith('.')}")
-                print(f"[DEBUG] ANSI codes found: {ansi_codes}")
+            # Debug code commented out for performance
+            # ansi_codes = ANSI_ESCAPE_PATTERN.findall(line_with_ansi)
+            # if ansi_codes and ('35' in str(ansi_codes) or '95' in str(ansi_codes)):
+            #     print(f"[DEBUG] Full line: '{line}'")
+            #     print(f"[DEBUG] Line length: {len(line)}, ends with period: {line.endswith('.')}")
+            #     print(f"[DEBUG] ANSI codes found: {ansi_codes}")
             
             # Check if line has both bold AND magenta (NPCs)
             # Server sends them as separate sequences: [1m][35m] not [1;35m]
@@ -491,26 +488,17 @@ class AutoWalker:
                 # Bold + Magenta = NPC
                 is_npc = True
                 has_purple = True
-                print(f"[DEBUG] Detected as NPC (bold + magenta separate)")
+                # print(f"[DEBUG] Detected as NPC (bold + magenta separate)")
             elif has_bright_magenta:
                 # Direct bright magenta = NPC
                 is_npc = True
                 has_purple = True
-                print(f"[DEBUG] Detected as NPC (bright magenta)")
+                # print(f"[DEBUG] Detected as NPC (bright magenta)")
             elif has_magenta and not has_bold:
                 # Just magenta without bold = Item
                 is_npc = False
                 has_purple = True
-                print(f"[DEBUG] Detected as ITEM (plain magenta, no bold)")
-            # elif '\x1b[35m' in line_with_ansi:  # This is redundant now
-                # Need to make sure it's not part of [1;35m or [35;1]
-                # Check if 35 appears without bold
-                import re
-                # Look for [35m or sequences like [0;35m but not [1;35m or [35;1]
-                if re.search(r'\x1b\[(?:0;)?35m', line_with_ansi) and not re.search(r'\x1b\[(?:1;35|35;1)m', line_with_ansi):
-                    is_npc = False
-                    has_purple = True
-                    print(f"[DEBUG] Detected as ITEM (plain magenta)")
+                # print(f"[DEBUG] Detected as ITEM (plain magenta, no bold)")
             
             if not has_purple:
                 # No purple color, skip
@@ -543,10 +531,8 @@ class AutoWalker:
             if entity_name:
                 if is_npc:
                     npcs.append(entity_name)
-                    print(f"[POSITION] Found NPC: {entity_name}")
                 else:
                     items.append(entity_name)
-                    print(f"[POSITION] Found item: {entity_name}")
             
             # Move to next line
             i += 1
@@ -572,7 +558,6 @@ class AutoWalker:
                 else:
                     items_data = {}
             except Exception as e:
-                print(f"[POSITION] Error loading items data: {e}")
                 items_data = {}
             
             if room_key not in items_data:
@@ -587,9 +572,8 @@ class AutoWalker:
                 os.makedirs(os.path.dirname(items_file), exist_ok=True)
                 with open(items_file, 'w', encoding='utf-8') as f:
                     json.dump(items_data, f, indent=2, ensure_ascii=False)
-                print(f"[POSITION] Saved {len(entities['items'])} items for room {room_id}")
-            except Exception as e:
-                print(f"[POSITION] Error saving items data: {e}")
+            except Exception:
+                pass
         
         # Save NPCs to NPCs database
         if entities['npcs']:
@@ -601,7 +585,6 @@ class AutoWalker:
                 else:
                     npcs_data = {}
             except Exception as e:
-                print(f"[POSITION] Error loading NPCs data: {e}")
                 npcs_data = {}
             
             if room_key not in npcs_data:
@@ -616,16 +599,13 @@ class AutoWalker:
                 os.makedirs(os.path.dirname(npcs_file), exist_ok=True)
                 with open(npcs_file, 'w', encoding='utf-8') as f:
                     json.dump(npcs_data, f, indent=2, ensure_ascii=False)
-                print(f"[POSITION] Saved {len(entities['npcs'])} NPCs for room {room_id}")
-            except Exception as e:
-                print(f"[POSITION] Error saving NPCs data: {e}")
+            except Exception:
+                pass
     
     def _map_to_original_positions(self, original, clean, clean_positions):
         try:
-            import re
-            ansi_escape = re.compile(r'\x1b\[[0-9;]*m')
-            
-            original_no_ansi = ansi_escape.sub('', original)
+            # Use pre-compiled regex for performance
+            original_no_ansi = ANSI_ESCAPE_PATTERN.sub('', original)
             clean_to_orig = []
             clean_idx = 0
             
