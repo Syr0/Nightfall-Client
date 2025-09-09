@@ -1,7 +1,7 @@
 #mainwindow.py with integrated terminal
 import tkinter as tk
 from tkinter import ttk
-from network.connection import MUDConnection
+from network.async_connection import MUDConnectionWrapper as MUDConnection
 from config.settings import load_config
 from map.map import MapViewer
 from core.positionfinder import AutoWalker

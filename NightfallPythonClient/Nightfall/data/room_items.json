@@ -194,5 +194,25 @@
     "last_seen": {
       "Central Player Board": "2025-09-08T20:41:52.506633"
     }
+  },
+  "595": {
+    "items": [
+      "leather jacket (slightly damaged)"
+    ],
+    "last_seen": {
+      "leather jacket (slightly damaged)": "2025-09-09T12:45:45.831441"
+    }
+  },
+  "594": {
+    "items": [
+      "stone obelisk with an inscription",
+      "sun dial",
+      "statue of Isaac Asimov"
+    ],
+    "last_seen": {
+      "stone obelisk with an inscription": "2025-09-09T12:45:59.155569",
+      "sun dial": "2025-09-09T12:45:59.155569",
+      "statue of Isaac Asimov": "2025-09-09T12:45:59.155569"
+    }
   }
 }
