@@ -48,9 +48,7 @@ class Camera:
         self.zoom = new_zoom
         self.canvas.scale("all", x, y, relative_factor, relative_factor)
         self.update_scroll_region()
-        
-        print(f"[CAMERA] Zoom changed to {self.zoom:.6f}")
-        
+
         # Auto-save camera state when zooming if we have a zone
         if hasattr(self, 'current_zone_id') and self.current_zone_id:
             self.save_zone_state(self.current_zone_id)
@@ -77,8 +75,6 @@ class Camera:
                 'view_y': y1,
                 'position': self.position
             }
-            print(f"[CAMERA] Saved state for {zone_id}: zoom={self.zoom:.6f}, view=({x1:.0f},{y1:.0f})")
-            # Also save to file for persistence
             self.save_states_to_file()
     
     def restore_zone_state(self, zone_id):

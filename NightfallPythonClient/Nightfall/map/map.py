@@ -356,6 +356,20 @@ class MapViewer:
             # No saved state - fit to content for first time viewing
             print(f"[MAP] No saved state for zone {zone_id}, fitting to content")
             self.this.after(100, self.camera.fit_to_content)
+        
+        # Re-highlight current room if we have one and it's in this zone
+        if hasattr(self, 'current_room_id') and self.current_room_id:
+            # Check if the current room is in this zone
+            fetch_room_zone_id = _db.get_room_zone
+            room_zone = fetch_room_zone_id(self.current_room_id)
+            if room_zone == zone_id:
+                # Re-apply the highlight to the current room
+                room_tag = f"{self.current_room_id}_room"
+                if self.this.find_withtag(room_tag):
+                    highlight_color = getattr(self, 'player_marker_color', '#FF6EC7')
+                    self.this.itemconfig(room_tag, fill=highlight_color)
+                    self.update_position_indicator(self.current_room_id)
+                    print(f"[MAP] Re-highlighted current room {self.current_room_id} after zone switch")
 
 
     def change_level(self, delta):
